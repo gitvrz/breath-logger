@@ -1,6 +1,7 @@
 // Monitor-style display: one row per signal (trace on the left, big value on the right).
 // The four rows share the time axis and the crosshair.
-//   live mode:   x follows the newest sample, y scales only grow (no jumping)
+//   live mode:   the caller moves the time axis every frame (setView), the grid stays
+//                still and the traces slide under it; y scales only grow (no jumping)
 //   review mode: drag to zoom (all rows together), pause/resume markers, value under cursor
 
 function withAlpha(hex, a) {
@@ -24,9 +25,11 @@ class MonitorStack {
     this.windowS = 30;
     this.data = [[], [], [], [], []]; // x, co2, o2, flow, pressure
     this.marks = [];                  // review: [{ x, label, kind }]
-    this.xFormat = live ? (v) => `${Math.round(v - this.latest)} s` : (v) => fmtTimer(v);
+    this.xFormat = (v) => fmtTimer(v); // review only, (v, tickSpacing); live labels: seconds before the edge
     this.cursorLabel = null;          // review: (x) -> text under the value
     this.latest = 0;
+    this.view = null;                 // live: time at the right edge (device seconds)
+    this.dataDirty = false;
     this.hoverIdx = null;
     this.resetRanges();
     this.build();
@@ -53,7 +56,7 @@ class MonitorStack {
       row.innerHTML = `
         <div class="mplot"></div>
         <div class="mvalue">
-          <div class="mname"><span class="dot"></span>${escapeHtml(channelName(ch))}<span class="unit">${ch.unit}</span><span class="tag warn fault-tag">${escapeHtml(t('live.noSignal'))}</span></div>
+          <div class="mname"><span class="dot"></span>${escapeHtml(channelName(ch))}<span class="unit">${ch.unit}</span><span class="tag warn fault-tag">${escapeHtml(t('live.noSignal'))}</span><span class="tag cursor-tag">${escapeHtml(t('live.cursorTag'))}</span></div>
           <div class="big">—</div>
           <div class="sub"></div>
         </div>`;
@@ -91,7 +94,13 @@ class MonitorStack {
           {
             stroke: muted, font, grid: { stroke: grid, width: 1 }, ticks: { show: false },
             size: i === last ? 26 : 2, space: this.live ? 60 : 90,
-            values: (u, splits, ax, space, incr) => splits.map((v) => (i === last ? this.xFormat(v, incr) : '')),
+            // live: grid lines at fixed seconds before the right edge, so they don't move
+            ...(this.live ? { splits: (u, ax, min, max, incr) => {
+              const out = [];
+              for (let v = max - incr; v >= min - 1e-9; v -= incr) out.unshift(v);
+              return out;
+            } } : {}),
+            values: (u, splits, ax, space, incr) => splits.map((v) => (i !== last ? '' : this.live ? `${Math.round(v - u.scales.x.max)} s` : this.xFormat(v, incr))),
           },
           { stroke: muted, font, grid: { stroke: grid, width: 1 }, ticks: { show: false }, size: 44, gap: 6 },
         ],
@@ -148,13 +157,37 @@ class MonitorStack {
     this.refresh();
   }
 
+  // Live: new samples. They are drawn by the next setView() (one redraw per frame).
+  setLiveData(data) {
+    this.data = data;
+    const x = data[0];
+    this.latest = x.length ? x[x.length - 1] : 0;
+    this.dataDirty = true;
+    this.updateValues();
+  }
+
+  // Live: moves the right edge of the time axis to `t` (device seconds), every frame
+  setView(t) {
+    this.view = t;
+    const dirty = this.dataDirty;
+    this.dataDirty = false;
+    this.plots.forEach((p, i) => p.batch(() => {
+      if (dirty) p.setData([this.data[0], this.data[i + 1]], false);
+      p.setScale('x', { min: t - this.windowS, max: t });
+    }));
+    if (this.hoverIdx != null) this.updateValues(); // the value under the cursor changes
+  }
+
   refresh() {
     const x = this.data[0];
     this.latest = x.length ? x[x.length - 1] : 0;
-    this.plots.forEach((p, i) => {
-      p.setData([x, this.data[i + 1]]);
-      if (this.live && x.length) p.setScale('x', { min: this.latest - this.windowS, max: this.latest });
-    });
+    if (this.live) {
+      this.dataDirty = true;
+      if (x.length) this.setView(this.view ?? this.latest);
+      this.updateValues();
+      return;
+    }
+    this.plots.forEach((p, i) => p.setData([x, this.data[i + 1]]));
     this.updateValues();
   }
 
@@ -188,11 +221,16 @@ class MonitorStack {
 
   updateValues() {
     const x = this.data[0];
+    // Live + mouse on the chart: the big value is NOT the current one, say so
+    const atCursor = this.live && this.hoverIdx != null && x.length > 0;
+    this.rows.forEach((r) => r.row.classList.toggle('at-cursor', atCursor));
     this.rows.forEach((r, c) => {
       const ch = CHANNELS[c];
       if (this.hoverIdx != null && x.length) {
         r.big.textContent = fmtValue(this.data[c + 1][this.hoverIdx], ch.dec);
-        r.sub.textContent = this.cursorLabel ? this.cursorLabel(x[this.hoverIdx]) : '';
+        r.sub.textContent = atCursor
+          ? t('live.cursorAgo', { s: fmtValue(Math.max(0, (this.view ?? this.latest) - x[this.hoverIdx]), 1) })
+          : this.cursorLabel ? this.cursorLabel(x[this.hoverIdx]) : '';
         return;
       }
       const st = this.visibleStats(c);

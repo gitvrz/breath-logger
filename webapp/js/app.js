@@ -1,6 +1,9 @@
 // Main page logic: navigation, device panel, recording controls, live monitor.
 
 const MAX_WINDOW_S = 60;
+// The live traces are drawn this late, so that samples arriving in batches every 100 ms
+// (plus USB jitter) are already there when the scrolling reaches them: smooth at 60 fps.
+const LIVE_DELAY_S = 0.2;
 
 class App {
   constructor() {
@@ -10,7 +13,9 @@ class App {
     this.status = null;
     this.recList = [];         // summaries from the device
     this.live = [[], [], [], [], []];
-    this.framePending = false;
+    this.lags = [];            // [{ at, lag }] PC time - device time of recent data (s)
+    this.lagMin = null;        // smoothed smallest lag: maps device time to PC time
+    this.loopRunning = false;
     this.page = 'live';
     this.transportMode = null; // 'setup' | 'running'
     this.runInfo = null;       // { key, startedMs, continued }
@@ -103,6 +108,7 @@ class App {
     $('#page-session').hidden = page !== 'session';
     if (page === 'recordings' && this.device && !this.recList.length) this.recs.refresh();
     $('.main').scrollTop = 0;
+    this.startLiveLoop();
   }
 
   renderNav() {
@@ -128,6 +134,7 @@ class App {
     this.device = device;
     this.mode = mode;
     this.live = [[], [], [], [], []];
+    this.resetLiveClock();
     this.lastDataMs = Date.now();
     this.debug?.reset();
     device.on('data', (m) => this.onData(m.s));
@@ -529,10 +536,14 @@ class App {
   onData(samples) {
     this.lastDataMs = Date.now();
     this.debug?.onData(samples);
+    if (!samples.length) return;
     for (const s of samples) {
       const x = this.live[0];
       const tt = s[0] / 1000;
-      if (x.length && tt < x[x.length - 1]) this.live = [[], [], [], [], []]; // device restarted
+      if (x.length && tt < x[x.length - 1]) { // device restarted
+        this.live = [[], [], [], [], []];
+        this.resetLiveClock();
+      }
       this.live[0].push(tt);
       for (let c = 1; c <= 4; c++) this.live[c].push(s[c]);
     }
@@ -542,13 +553,38 @@ class App {
     while (n < x.length && x[n] < cutoff) n++;
     if (n > 200) this.live.forEach((a) => a.splice(0, n));
 
-    if (!this.framePending && this.page === 'live') {
-      this.framePending = true;
-      requestAnimationFrame(() => {
-        this.framePending = false;
-        this.liveStack.setData(this.live);
-      });
-    }
+    // How late did the newest sample arrive? The smallest delay of the last 10 s is the
+    // link's true delay; the others are jitter. (Recomputed often: the device and PC
+    // clocks drift apart slowly.)
+    const at = performance.now() / 1000;
+    this.lags.push({ at, lag: at - x[x.length - 1] });
+    while (this.lags[0].at < at - 10) this.lags.shift();
+    this.liveStack.setLiveData(this.live);
+    this.startLiveLoop();
+  }
+
+  resetLiveClock() {
+    this.lags = [];
+    this.lagMin = null;
+  }
+
+  // One redraw per screen frame while the Live page shows data
+  startLiveLoop() {
+    if (this.loopRunning) return;
+    this.loopRunning = true;
+    const frame = () => {
+      if (!this.device || this.page !== 'live' || !this.lags.length) {
+        this.loopRunning = false; // restarted by the next data or by coming back to Live
+        return;
+      }
+      const target = Math.min(...this.lags.map((l) => l.lag));
+      // Follow changes gently (0.5 ms per frame) so the scrolling never jumps; snap on big changes
+      if (this.lagMin == null || Math.abs(target - this.lagMin) > 1) this.lagMin = target;
+      else this.lagMin += Math.max(-0.0005, Math.min(0.0005, target - this.lagMin));
+      this.liveStack.setView(performance.now() / 1000 - this.lagMin - LIVE_DELAY_S);
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
   }
 }
 

@@ -320,6 +320,10 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .mrow.fault .mvalue .big { color: var(--muted); }
 .mrow .fault-tag { display: none; }
 .mrow.fault .fault-tag { display: inline-flex; }
+/* Live, mouse on the chart: the big value is from the past */
+.mrow .cursor-tag { display: none; }
+.mrow.at-cursor .cursor-tag { display: inline-flex; }
+.mrow.at-cursor .mvalue .big { color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 10px; }
 
 /* ---- live: empty state ---------------------------------------------------- */
