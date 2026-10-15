@@ -33,6 +33,13 @@ What the page does:
   erased**, and "Show all" brings it back), CSV download with an optional date/time column.
 - French / English, light / dark theme. Works offline (fonts and libraries are in `webapp/`).
 
+## Open the app like a program
+
+Double-click `launcher/Creer le raccourci.bat` once: it creates a **Breath Logger** shortcut
+on the Desktop and in the Start menu (so Windows search finds it). The shortcut opens the
+page in its own Chrome window (Edge if Chrome is missing), without tabs or address bar.
+Run it again if the folder moves.
+
 ## Flash the device
 
 1. On **Windows** (not WSL: WSL can't see USB devices without extra setup), install
