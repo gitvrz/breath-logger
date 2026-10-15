@@ -1,0 +1,141 @@
+# Device ↔ PC protocol (v1)
+
+Transport: USB serial (CDC). Baud rate is ignored by native USB but use 115200.
+Encoding: **one JSON object per line** (`\n` terminated), UTF-8, both directions.
+Lines that don't start with `{` (e.g. ESP32 boot messages) must be ignored.
+
+## PC → device: commands
+
+Every command has `cmd` and an optional numeric `id`. The device answers each
+command with exactly one `reply` carrying the same `id`.
+
+| cmd | fields | allowed while recording | notes |
+|---|---|---|---|
+| `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock. Send right after connecting. Reply contains `info` + `status`. |
+| `status` | – | yes | Reply contains `status`. |
+| `start` | `rec`, `session` (`"new"` or a session id), `notes`? | – (idle only) | Creates the recording folder if needed. `session` = id → continue that session (append). |
+| `pause` | – | yes | Only when recording. |
+| `resume` | – | yes | Only when paused. |
+| `stop` | – | yes | From recording or paused. |
+| `list` | – | yes | Sends one `item` message per recording (`name`, `created`, `notes`, `sessions` count, `duration_s` total recorded, `last_ms` Unix ms of the latest sample), then the reply with `count`. Streaming keeps the ESP32's RAM use constant whatever the number of recordings. |
+| `get` | `rec` | yes | Reply: `meta` = full meta.json of one recording. |
+| `create` | `rec`, `notes`? | idle only | Creates an empty recording. |
+| `rename` | `rec`, `to` | idle only | |
+| `delete` | `rec`, `session`? | idle only | Without `session` deletes the whole recording. Data is **moved to `/trash`**, not erased. |
+| `notes` | `rec`, `session`?, `notes` | idle only | Without `session` sets the recording notes. |
+| `read` | `rec`, `session`, `offset`, `len` (≤ 4096) | idle only | Reply: `data` (CSV text), `offset`, `size` (file size), `eof`, `n` (bytes in `data`), `crc` (CRC-32 of `data`, as zlib). Pull-based: PC asks for the next chunk, and asks again if `n` or `crc` do not match. |
+| `trim` | `rec`, `session`, `from_s`, `to_s` | idle only | Hides rows outside `from_s ≤ t_s ≤ to_s`. **The CSV is never modified**: the trim is added to the session's `trims` in meta.json. At most 16 trims per session. |
+| `restore` | `rec`, `session` | idle only | Cancels all trims of a session: every row is visible again. |
+| `trash` | – | idle only | Reply: `items`, `bytes` of the trash. |
+| `empty_trash` | – | idle only | Erases `/trash` for good. |
+
+Recording names: `[A-Za-z0-9_-]`, 1–32 characters. The device rejects anything else.
+
+## Device → PC: messages
+
+### `reply`
+```json
+{"type":"reply","id":7,"ok":true, ...payload}
+{"type":"reply","id":7,"ok":false,"error":"busy: recording"}
+```
+
+### `item`
+One element of a long answer (`list`), with the `id` of the command. The `reply` comes after the last item.
+
+### `data` (live samples, always sent, ~10 messages/s)
+```json
+{"type":"data","s":[[t_ms, co2, o2, flow, pressure], ...]}
+```
+`t_ms` = milliseconds since device boot (monotonic, used for live display only).
+
+### `status` (every 500 ms and after every state change)
+```json
+{"type":"status","state":"idle|recording|paused","rec":"subject01","session":2,
+ "t_s":12.34,"samples":617,"run_samples":617,"dropped":0,"live_dropped":0,
+ "acq_ok":true,"faults":[],
+ "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321}
+```
+- `samples`: rows in the session file; `run_samples`: rows since the last `start` / `continue`.
+- `dropped`: samples lost **for the SD recording** (should always be 0).
+- `live_dropped`: samples not sent to the PC (harmless, display only).
+- `acq_ok`: false when no sample was acquired for 1 s (e.g. a sensor driver stuck).
+- `faults`: channels (`co2`, `o2`, `flow`, `pressure`) without a valid value for 1 s.
+- Sensor values that are not finite or beyond ±100000 are stored as missing (empty CSV cell).
+
+### `event` (asynchronous problems)
+```json
+{"type":"event","level":"error","msg":"SD write failed - recording stopped"}
+```
+
+## SD card layout
+
+```
+/recordings/<name>/meta.json
+/recordings/<name>/session_001.csv
+/recordings/<name>/session_002.csv
+```
+
+### CSV
+```
+t_s,co2_pct,o2_pct,flow_lpm,pressure_cmh2o
+0.000,0.041,20.940,12.31,0.152
+0.020,...
+```
+`t_s` = seconds since the **session's first start**. Pauses appear as gaps in time.
+Continuing a session later keeps counting from the original start (so a gap of
+hours is normal).
+
+### meta.json
+```json
+{
+  "name": "subject01",
+  "created": "2026-10-12T09:41:00Z",
+  "notes": "",
+  "rate_hz": 50,
+  "columns": ["t_s","co2_pct","o2_pct","flow_lpm","pressure_cmh2o"],
+  "next_session": 3,
+  "sessions": [
+    {"id": 1, "file": "session_001.csv", "start": "2026-10-12T09:42:00Z",
+     "start_ms": 1760262120000, "clock": true, "notes": "",
+     "samples": 14515, "hidden_samples": 0, "duration_s": 290.3, "end_s": 300.0, "dropped": 0,
+     "events": [{"t_s":0,"type":"start"},{"t_s":120.5,"type":"pause"},
+                {"t_s":130.2,"type":"resume"},{"t_s":300,"type":"stop"}]}
+  ]
+}
+```
+- `samples` = rows in the CSV file. `hidden_samples` = rows hidden by trims.
+- `duration_s` = visible time actually recorded (`(samples - hidden_samples) / rate_hz`,
+  pauses excluded).
+- `end_s` = `t_s` of the last row (pauses and continuation gaps included).
+
+- `dropped` = samples lost because the SD card was too slow (should be 0).
+
+Event types: `start`, `pause`, `resume`, `stop`, `continue`,
+`lost` (with `n`: samples lost there), `stall` (acquisition stopped delivering samples).
+A session without a final `stop` event was interrupted (power loss, reset); its CSV
+is still valid up to the last second before the interruption.
+
+### Trims (raw data is never modified)
+
+A trim only hides rows; the CSV file on the card always holds everything recorded.
+```json
+"trims": [{"from_s": 32.9, "to_s": 113.9, "end_s": 180.0, "at_ms": 1792071881007}],
+"edits": [{"type": "trim", "at_ms": 1792071881007, "from_s": 32.9, "to_s": 113.9},
+          {"type": "restore", "at_ms": 1792072000000}]
+```
+- A row is visible if, for every trim, `t_s > end_s` or `from_s ≤ t_s ≤ to_s`.
+  `end_s` is the session's end when the trim was made: rows recorded later (session
+  continued) are not affected by it.
+- `edits` is the history of trims and restores (`at_ms` = PC time, absent if the clock
+  was not set). `restore` empties `trims` but keeps `edits`.
+- The page shows and exports only the visible rows; the download dialog can include the
+  hidden ones. When reading the card on a PC, apply `trims` yourself or use the full data.
+
+## Trash
+
+Deleted data is moved to `/trash` instead of being erased:
+```
+/trash/<rec>__20261012-143012/                         deleted recording (whole folder)
+/trash/<rec>__s002__20261012-143012.csv + .json         deleted session (data + its meta)
+```
+To recover, read the card on a computer and copy the files back. `empty_trash` erases it.

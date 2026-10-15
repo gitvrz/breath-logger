@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+__pycache__/
+
+# Windows download metadata, screen recordings
+*:Zone.Identifier
+*.mp4

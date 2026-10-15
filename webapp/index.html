@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Breath Logger</title>
+  <link rel="stylesheet" href="css/uPlot.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="9" fill="currentColor"/><path d="M5 17h4.5l2.5-6 4 11 3-8 2 3H27" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Breath Logger</div>
+        <div class="brand-tag" data-i18n="app.tagline"></div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-route="live"><i data-icon="live"></i><span data-i18n="nav.live"></span><span class="nav-rec" id="navRec" hidden></span></button>
+      <button class="nav-item" data-route="recordings"><i data-icon="folder"></i><span data-i18n="nav.recordings"></span><span class="nav-count" id="navCount"></span></button>
+    </nav>
+
+    <div class="sidebar-fill"></div>
+
+    <section class="device" id="device"></section>
+
+    <div class="prefs">
+      <div class="seg seg-icons" id="themeSeg" role="radiogroup">
+        <button data-theme-choice="system" data-i18n-title="pref.system"><i data-icon="monitor" data-size="15"></i></button>
+        <button data-theme-choice="light" data-i18n-title="pref.light"><i data-icon="sun" data-size="15"></i></button>
+        <button data-theme-choice="dark" data-i18n-title="pref.dark"><i data-icon="moon" data-size="15"></i></button>
+      </div>
+      <div class="seg" id="langSeg">
+        <button data-lang="fr">FR</button>
+        <button data-lang="en">EN</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- LIVE -->
+    <section class="page page-live" id="page-live">
+      <header class="page-head">
+        <div>
+          <h1 data-i18n="live.title"></h1>
+          <p class="page-sub" data-i18n="live.subtitle"></p>
+        </div>
+        <div class="head-actions" id="liveTools">
+          <span class="label-sm" data-i18n="live.window"></span>
+          <div class="seg" id="winSeg">
+            <button data-win="10">10 s</button>
+            <button data-win="30" class="active">30 s</button>
+            <button data-win="60">60 s</button>
+          </div>
+        </div>
+      </header>
+
+      <div class="hero" id="liveEmpty">
+        <div class="hero-art" aria-hidden="true">
+          <svg viewBox="0 0 220 90" width="220" height="90"><path d="M0 50h40l12-26 18 52 14-40 10 14h36l12-26 18 52 14-40 10 14h36" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h2 data-i18n="live.emptyTitle"></h2>
+        <p data-i18n="live.emptyText"></p>
+        <div class="hero-actions">
+          <button class="btn primary lg" data-action="connect"><i data-icon="plug"></i><span data-i18n="device.connect"></span></button>
+          <button class="btn lg" data-action="demo"><i data-icon="flask"></i><span data-i18n="device.demo"></span></button>
+        </div>
+        <p class="hero-note" id="heroNoSerial" hidden data-i18n="device.noSerial"></p>
+      </div>
+
+      <div class="alert" id="liveAlert" role="alert" hidden></div>
+      <div class="transport card" id="transport" hidden></div>
+      <div class="monitor card" id="liveMonitor" hidden></div>
+    </section>
+
+    <!-- RECORDINGS -->
+    <section class="page page-recs" id="page-recordings" hidden>
+      <header class="page-head">
+        <div>
+          <h1 data-i18n="list.title"></h1>
+          <p class="page-sub" data-i18n="list.subtitle"></p>
+        </div>
+        <div class="head-actions">
+          <button class="btn ghost" id="btnTrash"><i data-icon="trash" data-size="16"></i><span data-i18n="list.trash"></span><span class="btn-count" id="trashCount"></span></button>
+          <button class="btn ghost" id="btnRefresh"><i data-icon="refresh" data-size="16"></i><span data-i18n="list.refresh"></span></button>
+          <button class="btn primary" id="btnNewRec"><i data-icon="plus" data-size="16"></i><span data-i18n="list.new"></span></button>
+        </div>
+      </header>
+      <div class="notice" id="recBusy" hidden><i data-icon="info" data-size="16"></i><span data-i18n="list.busy"></span></div>
+      <div class="recs">
+        <div class="recs-list card">
+          <div class="search">
+            <i data-icon="search" data-size="16"></i>
+            <input id="recSearch" type="search" data-i18n-placeholder="list.search" autocomplete="off">
+          </div>
+          <div class="list-scroll" id="recList"></div>
+        </div>
+        <div class="recs-detail" id="recDetail"></div>
+      </div>
+    </section>
+
+    <!-- SESSION VIEWER -->
+    <section class="page page-view" id="page-session" hidden>
+      <header class="page-head">
+        <div>
+          <button class="crumb" id="viewBack"><i data-icon="back" data-size="16"></i><span data-i18n="view.back"></span></button>
+          <h1 id="viewTitle"></h1>
+          <p class="page-sub" id="viewSub"></p>
+        </div>
+        <div class="head-actions wrap">
+          <div class="seg" id="axisSeg" data-i18n-title="view.axis">
+            <button data-axis="elapsed" class="active" data-i18n="view.elapsed"></button>
+            <button data-axis="clock" data-i18n="view.clock"></button>
+          </div>
+          <button class="btn ghost icon-only" id="btnResetZoom" data-i18n-title="view.resetZoom"><i data-icon="expand" data-size="16"></i></button>
+          <button class="btn" id="btnTrim" data-i18n-title="view.trimHelp"><i data-icon="scissors" data-size="16"></i><span data-i18n="view.trim"></span></button>
+          <button class="btn" id="btnViewDownload"><i data-icon="download" data-size="16"></i><span data-i18n="view.download"></span></button>
+          <button class="btn primary" id="btnViewContinue"><i data-icon="resume" data-size="16"></i><span data-i18n="detail.continue"></span></button>
+        </div>
+      </header>
+      <div class="loading" id="viewLoading" hidden>
+        <span data-i18n="view.loading"></span>
+        <div class="progress"><div></div></div>
+      </div>
+      <div class="monitor card" id="viewMonitor"></div>
+      <p class="hint" data-i18n="view.hint"></p>
+    </section>
+  </main>
+</div>
+
+<dialog id="dialog"></dialog>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="js/vendor/uPlot.iife.min.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/util.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/transport-serial.js"></script>
+<script src="js/mock-device.js"></script>
+<script src="js/device.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/recordings.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
