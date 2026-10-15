@@ -32,9 +32,14 @@ static void txPush(const uint8_t *p, size_t n) {  // caller checked the room
   if (txCount > statTxMax) statTxMax = txCount;
 }
 
+// Packets of at most 63 bytes: Windows keeps full 64-byte USB packets for itself until a
+// shorter one arrives, which held the live data back for up to 0.5 s (measured with
+// tools/jitter.py). A packet shorter than 64 bytes is always handed to the program at once.
+static const size_t USB_PACKET_MAX = 63;
+
 bool linkPump() {
   while (txCount && usb_serial_jtag_ll_txfifo_writable()) {
-    size_t c = min(min(txCount, sizeof(txq) - txTail), (size_t)64);
+    size_t c = min(min(txCount, sizeof(txq) - txTail), USB_PACKET_MAX);
     uint32_t n = usb_serial_jtag_ll_write_txfifo(txq + txTail, c);
     if (n == 0) break;
     usb_serial_jtag_ll_txfifo_flush();
