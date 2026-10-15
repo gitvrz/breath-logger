@@ -56,7 +56,7 @@ class MonitorStack {
       row.innerHTML = `
         <div class="mplot"></div>
         <div class="mvalue">
-          <div class="mname"><span class="dot"></span>${escapeHtml(channelName(ch))}<span class="unit">${ch.unit}</span><span class="tag warn fault-tag">${escapeHtml(t('live.noSignal'))}</span><span class="tag cursor-tag">${escapeHtml(t('live.cursorTag'))}</span></div>
+          <div class="mname"><span class="dot"></span>${escapeHtml(channelName(ch))}<span class="unit">${ch.unit}</span><span class="tag warn fault-tag">${escapeHtml(t('live.noSignal'))}</span><span class="tag warn sim-tag">${escapeHtml(t('live.simTag'))}</span><span class="tag cursor-tag">${escapeHtml(t('live.cursorTag'))}</span></div>
           <div class="big">—</div>
           <div class="sub"></div>
         </div>`;
@@ -189,6 +189,11 @@ class MonitorStack {
     }
     this.plots.forEach((p, i) => p.setData([x, this.data[i + 1]]));
     this.updateValues();
+  }
+
+  // Values made up by the firmware or the demo, not measured: tag on every signal
+  setSimulated(on) {
+    this.container.classList.toggle('simulated', on);
   }
 
   // Channels without a valid value (ids like 'co2'): greyed value + "No signal"

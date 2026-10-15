@@ -12,10 +12,15 @@ tools/      devtest.py: hardware test without the browser
 
 ## Try the page now (no hardware needed)
 
-1. Open `webapp/index.html` in **Chrome** or **Edge** (double-click it).
+1. Open `webapp/index.html?demo` in **Chrome** or **Edge** (type `?demo` after the file
+   address: without it the page shows only *Connect*, for use with the real device).
 2. Click **Demo mode**: a fake device inside the page produces realistic breathing signals,
    with example recordings (including a session continued the next day).
    Demo recordings disappear when the page is reloaded.
+
+Simulated values are always flagged: a yellow banner above the live view and a
+*Simulated* tag on each signal, in demo mode and when the firmware runs with
+`USE_SIMULATED_SENSORS 1`.
 
 What the page does:
 - **Live**: 4 signals in monitor layout (trace + big value, min/max over the window),

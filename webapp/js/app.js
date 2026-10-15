@@ -22,6 +22,8 @@ class App {
     this.setup = { name: '', mode: 'new', session: null, notes: '' };
     this.lastDataMs = 0;
     this.debug = DebugPanel.wanted() ? new DebugPanel() : null; // index.html?debug
+    // Demo mode (fake device in the page) only with index.html?demo: for tests and showing the app
+    this.demoAllowed = new URLSearchParams(location.search).has('demo');
 
     this.initTheme();
     document.documentElement.lang = LANG;
@@ -48,6 +50,7 @@ class App {
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => this.rebuildCharts());
 
     if (!SerialTransport.supported()) $('#heroNoSerial').hidden = false;
+    $$('[data-action="demo"]').forEach((b) => (b.hidden = !this.demoAllowed));
     setInterval(() => this.checkAlerts(), 1000);
     this.renderAll();
   }
@@ -183,7 +186,7 @@ class App {
         </div>
         <div class="device-actions">
           <button class="btn primary" data-action="connect" ${noSerial ? 'disabled' : ''}>${icon('plug', 16)}${escapeHtml(t('device.connect'))}</button>
-          <button class="btn" data-action="demo">${icon('flask', 16)}${escapeHtml(t('device.demo'))}</button>
+          ${this.demoAllowed ? `<button class="btn" data-action="demo">${icon('flask', 16)}${escapeHtml(t('device.demo'))}</button>` : ''}
         </div>`;
       return;
     }
@@ -257,6 +260,12 @@ class App {
     $('#transport').hidden = !connected || !this.status;
     $('#liveMonitor').hidden = !connected;
     $('#liveTools').hidden = !connected;
+    // Simulated values must never pass for real measurements
+    const sim = connected && (this.mode === 'demo' || !!this.info?.simulated);
+    const simEl = $('#liveSim');
+    simEl.hidden = !sim;
+    if (sim) simEl.innerHTML = `${icon('flask', 18)}<span>${escapeHtml(t(this.mode === 'demo' ? 'live.simDemo' : 'live.simFirmware'))}</span>`;
+    this.liveStack.setSimulated(sim);
     if (!connected || !this.status) {
       this.transportMode = null;
       return;
