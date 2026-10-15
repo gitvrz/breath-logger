@@ -16,6 +16,7 @@ class App {
     this.runInfo = null;       // { key, startedMs, continued }
     this.setup = { name: '', mode: 'new', session: null, notes: '' };
     this.lastDataMs = 0;
+    this.debug = DebugPanel.wanted() ? new DebugPanel() : null; // index.html?debug
 
     this.initTheme();
     document.documentElement.lang = LANG;
@@ -128,6 +129,7 @@ class App {
     this.mode = mode;
     this.live = [[], [], [], [], []];
     this.lastDataMs = Date.now();
+    this.debug?.reset();
     device.on('data', (m) => this.onData(m.s));
     device.on('status', (m) => this.onStatus(m));
     device.on('event', (m) => toast(m.level === 'error' ? errText(m.msg) : m.msg, m.level === 'error' ? 'error' : 'info'));
@@ -212,6 +214,7 @@ class App {
   onStatus(st) {
     const prev = this.status;
     this.status = st;
+    this.debug?.onStatus(st);
     const changed = !prev || prev.state !== st.state || prev.rec !== st.rec || prev.session !== st.session;
     this.updateDeviceRows();
     this.liveStack.setFaults(st.faults || []);
@@ -525,6 +528,7 @@ class App {
 
   onData(samples) {
     this.lastDataMs = Date.now();
+    this.debug?.onData(samples);
     for (const s of samples) {
       const x = this.live[0];
       const tt = s[0] / 1000;

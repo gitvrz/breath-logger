@@ -61,6 +61,12 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
 - `acq_ok`: false when no sample was acquired for 1 s (e.g. a sensor driver stuck).
 - `faults`: channels (`co2`, `o2`, `flow`, `pressure`) without a valid value for 1 s.
 - Sensor values that are not finite or beyond ±100000 are stored as missing (empty CSV cell).
+- `diag` (only in the periodic status, timing diagnostics over the last 500 ms):
+  `{"tx_max":420,"stall_max_ms":3,"loop_max_ms":6,"age_max_ms":4}`.
+  `tx_max`: most bytes waiting in the device's USB queue; `stall_max_ms`: longest time bytes
+  were ready but the PC took nothing; `loop_max_ms`: longest turn of the IO loop;
+  `age_max_ms`: oldest live sample when queued for USB. Shown by `tools/jitter.py` and by
+  the page opened with `index.html?debug`.
 
 ### `event` (asynchronous problems)
 ```json

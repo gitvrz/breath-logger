@@ -13,3 +13,6 @@ bool linkSendJson(JsonDocument &doc, bool important);
 void linkSendEvent(const char *level, const char *msg);
 // Feeds queued bytes to the USB hardware. Call often; returns true if bytes are waiting.
 bool linkPump();
+// Diagnostics since the last call (then reset): most bytes waiting in the queue, and the
+// longest time bytes were waiting while the USB hardware took nothing (PC not reading).
+void linkTakeStats(uint32_t &txMax, uint32_t &stallMaxMs);

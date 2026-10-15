@@ -45,11 +45,23 @@ static void addStatus(JsonObject o) {
   o["uptime_s"] = millis() / 1000;
 }
 
-void sendStatus() {
+uint32_t diagLoopMaxMs = 0, diagAgeMaxMs = 0;
+
+void sendStatus(bool diag) {
   JsonDocument doc;
   JsonObject o = doc.to<JsonObject>();
   o["type"] = "status";
   addStatus(o);
+  if (diag) {  // where live data could wait inside the device (docs/protocol.md)
+    uint32_t txMax, stallMax;
+    linkTakeStats(txMax, stallMax);
+    JsonObject d = o["diag"].to<JsonObject>();
+    d["tx_max"] = txMax;
+    d["stall_max_ms"] = stallMax;
+    d["loop_max_ms"] = diagLoopMaxMs;
+    d["age_max_ms"] = diagAgeMaxMs;
+    diagLoopMaxMs = diagAgeMaxMs = 0;
+  }
   linkSendJson(doc, false);
 }
 

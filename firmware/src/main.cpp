@@ -5,6 +5,7 @@
 //
 // Protocol: docs/protocol.md
 #include <Arduino.h>
+#include <esp_timer.h>
 #include "acquisition.h"
 #include "commands.h"
 #include "config.h"
@@ -51,6 +52,8 @@ static void sendLive() {
       msg.add(']');
     }
     msg.add("]}\n");
+    uint32_t age = (esp_timer_get_time() - batch[0].t_us) / 1000;  // oldest sample's wait
+    if (age > diagAgeMaxMs) diagAgeMaxMs = age;
     if (!msg.overflow()) linkSend(msg.c_str(), msg.len(), false);
     count = 0;
   }
@@ -73,8 +76,11 @@ static void watchAcquisition() {
 
 static void ioTask(void *) {
   static char line[2048];
-  uint32_t lastStatus = 0;
+  uint32_t lastStatus = 0, lastTurn = millis();
   for (;;) {
+    uint32_t turn = millis();  // time between two turns: work + sleep
+    if (turn - lastTurn > diagLoopMaxMs) diagLoopMaxMs = turn - lastTurn;
+    lastTurn = turn;
     while (linkReadLine(line, sizeof(line))) commandsHandle(line);
     recorderPoll();
     sendLive();
@@ -83,7 +89,7 @@ static void ioTask(void *) {
     uint32_t now = millis();
     if (now - lastStatus >= STATUS_PERIOD_MS) {
       lastStatus = now;
-      sendStatus();
+      sendStatus(true);
     }
     ledUpdate();
     vTaskDelay(pdMS_TO_TICKS(linkPump() ? 1 : 5));  // drain the USB queue faster

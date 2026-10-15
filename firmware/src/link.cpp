@@ -17,6 +17,7 @@ static uint8_t txq[16384];
 static size_t txHead = 0, txTail = 0, txCount = 0;  // head = next write, tail = next read
 static uint32_t lastProgressMs = 0;
 static bool hostReading = true;  // false once the PC stopped reading for 1 s
+static uint32_t statTxMax = 0, statStallMaxMs = 0;
 
 static void txPush(const uint8_t *p, size_t n) {  // caller checked the room
   if (txCount == 0) lastProgressMs = millis();
@@ -28,6 +29,7 @@ static void txPush(const uint8_t *p, size_t n) {  // caller checked the room
     p += c;
     n -= c;
   }
+  if (txCount > statTxMax) statTxMax = txCount;
 }
 
 bool linkPump() {
@@ -41,12 +43,23 @@ bool linkPump() {
     lastProgressMs = millis();
     hostReading = true;
   }
+  if (txCount) {
+    uint32_t stall = millis() - lastProgressMs;
+    if (stall > statStallMaxMs) statStallMaxMs = stall;
+  }
   if (txCount && millis() - lastProgressMs > 1000) {
     // Nobody reads the port (page closed): drop what is queued, send again when it reads
     hostReading = false;
     txHead = txTail = txCount = 0;
   }
   return txCount > 0;
+}
+
+void linkTakeStats(uint32_t &txMax, uint32_t &stallMaxMs) {
+  txMax = statTxMax;
+  stallMaxMs = statStallMaxMs;
+  statTxMax = txCount;
+  statStallMaxMs = 0;
 }
 
 void linkBegin() {
