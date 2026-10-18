@@ -10,6 +10,7 @@
 #include "commands.h"
 #include "config.h"
 #include "link.h"
+#include "net.h"
 #include "recorder.h"
 #include "sensors.h"
 #include "storage.h"
@@ -82,6 +83,7 @@ static void ioTask(void *) {
     if (turn - lastTurn > diagLoopMaxMs) diagLoopMaxMs = turn - lastTurn;
     lastTurn = turn;
     while (linkReadLine(line, sizeof(line))) commandsHandle(line);
+    netPoll();
     recorderPoll();
     sendLive();
     watchAcquisition();
@@ -98,6 +100,7 @@ static void ioTask(void *) {
 
 void setup() {
   linkBegin();
+  netBegin();
   storageMount();
   sensorsBegin();
   acqBegin();

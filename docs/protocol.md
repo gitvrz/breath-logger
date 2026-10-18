@@ -4,6 +4,13 @@ Transport: USB serial (CDC). Baud rate is ignored by native USB but use 115200.
 Encoding: **one JSON object per line** (`\n` terminated), UTF-8, both directions.
 Lines that don't start with `{` (e.g. ESP32 boot messages) must be ignored.
 
+**Wi-Fi (prototype, `WIFI_ENABLED` in `config.h`)**: the device creates the network
+`BreathLogger-XXXX` (password `breathlogger`) and serves the page at `http://192.168.4.1/`.
+The same messages go through a WebSocket at `ws://192.168.4.1:81/`, **one JSON object per
+WebSocket text message** (no `\n`). USB and several Wi-Fi clients work at the same time:
+a `reply` (and its `item`s) goes only to the client that sent the command; `data`,
+`status` and `event` go to everyone. Clients that stop answering pings are dropped after ~5 s.
+
 ## PC → device: commands
 
 Every command has `cmd` and an optional numeric `id`. The device answers each
@@ -53,9 +60,10 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
 {"type":"status","state":"idle|recording|paused","rec":"subject01","session":2,
  "t_s":12.34,"samples":617,"run_samples":617,"dropped":0,"live_dropped":0,
  "acq_ok":true,"faults":[],
- "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321}
+ "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321,"wifi_clients":1}
 ```
 - `samples`: rows in the session file; `run_samples`: rows since the last `start` / `continue`.
+- `wifi_clients`: pages or tools connected over Wi-Fi (the `hello` reply's `info.wifi` is the network name, `""` when Wi-Fi is off).
 - `dropped`: samples lost **for the SD recording** (should always be 0).
 - `live_dropped`: samples not sent to the PC (harmless, display only).
 - `acq_ok`: false when no sample was acquired for 1 s (e.g. a sensor driver stuck).

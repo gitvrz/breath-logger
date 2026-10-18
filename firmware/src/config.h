@@ -32,6 +32,17 @@
 // RGB status LED (DevKitC-1: 48 or 38). -1 = none (the XIAO has no RGB LED).
 #define STATUS_LED_PIN -1
 
+// --- Wi-Fi (prototype) -----------------------------------------------------------
+// The device creates its own Wi-Fi network and serves the web page itself: join
+// "BreathLogger-XXXX" and open http://192.168.4.1 (most systems open it by themselves).
+// Same messages as over USB, through a WebSocket. USB keeps working at the same time.
+#define WIFI_ENABLED 1
+#define WIFI_SSID_PREFIX "BreathLogger-"    // + 4 hex digits of the device's MAC address
+#define WIFI_PASSWORD "breathlogger"         // prototype: the same for every device
+#define WIFI_CHANNEL 6
+#define WIFI_MAX_CLIENTS 4
+#define WS_PORT 81                           // WebSocket (the page itself is on port 80)
+
 // --- Tasks & buffers -----------------------------------------------------------
 #define ACQ_CORE 1             // acquisition alone on core 1
 #define IO_CORE 0              // SD writing + USB communication on core 0

@@ -25,6 +25,16 @@ class App {
     // Demo mode (fake device in the page) only with index.html?demo: for tests and showing the app
     this.demoAllowed = new URLSearchParams(location.search).has('demo');
 
+    // Page opened from the device itself (its own Wi-Fi network): connect over Wi-Fi by
+    // itself and come back after a cut. Opened from this computer: USB, as before.
+    this.served = WsTransport.served();
+    this.netMode = this.served ? 'wifi' : 'usb';
+    this.userClosed = false;
+    if (this.served) {
+      $$('[data-i18n="device.connect"]').forEach((el) => (el.dataset.i18n = 'device.connectWifi'));
+      $('[data-i18n="live.emptyText"]').dataset.i18n = 'live.emptyTextWifi';
+    }
+
     this.initTheme();
     document.documentElement.lang = LANG;
     applyIcons();
@@ -37,9 +47,12 @@ class App {
     document.addEventListener('click', (e) => {
       const a = e.target.closest('[data-action="connect"], [data-action="demo"], [data-action="disconnect"]');
       if (!a || a.disabled) return;
-      if (a.dataset.action === 'connect') this.connect('usb');
+      if (a.dataset.action === 'connect') this.connect(this.netMode);
       else if (a.dataset.action === 'demo') this.connect('demo');
-      else this.device?.close();
+      else {
+        this.userClosed = true;
+        this.device?.close();
+      }
     });
     $$('#winSeg button').forEach((b) => (b.onclick = () => {
       $$('#winSeg button').forEach((x) => x.classList.toggle('active', x === b));
@@ -49,10 +62,11 @@ class App {
     $$('#themeSeg button').forEach((b) => (b.onclick = () => this.setTheme(b.dataset.themeChoice)));
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => this.rebuildCharts());
 
-    if (!SerialTransport.supported()) $('#heroNoSerial').hidden = false;
+    if (!this.served && !SerialTransport.supported()) $('#heroNoSerial').hidden = false;
     $$('[data-action="demo"]').forEach((b) => (b.hidden = !this.demoAllowed));
     setInterval(() => this.checkAlerts(), 1000);
     this.renderAll();
+    if (this.served) this.connect('wifi');
   }
 
   // ---- preferences -------------------------------------------------------------
@@ -126,19 +140,21 @@ class App {
 
   async connect(mode) {
     if (this.device) await this.device.close();
-    const transport = mode === 'demo' ? new MockTransport() : new SerialTransport();
+    this.userClosed = false;
+    const transport = mode === 'demo' ? new MockTransport() : mode === 'wifi' ? new WsTransport() : new SerialTransport();
     const device = new Device(transport);
     try {
       await transport.open();
     } catch (e) {
-      if (e.name !== 'NotFoundError') toast(t('toast.openFailed', { msg: e.message }), 'error'); // NotFoundError = window closed
+      if (mode === 'wifi') this.reconnectSoon(); // device not reachable yet: try again quietly
+      else if (e.name !== 'NotFoundError') toast(t('toast.openFailed', { msg: e.message }), 'error'); // NotFoundError = window closed
       return;
     }
     this.device = device;
     this.mode = mode;
     this.live = [[], [], [], [], []];
     this.resetLiveClock();
-    this.lastDataMs = Date.now();
+    this.lastDataMs = this.lastMsgMs = Date.now();
     this.debug?.reset();
     device.on('data', (m) => this.onData(m.s));
     device.on('status', (m) => this.onStatus(m));
@@ -148,7 +164,7 @@ class App {
       const r = await device.request('hello', { time: Date.now() });
       this.info = r.info;
       this.onStatus(r.status);
-      if (mode === 'usb') toast(t('toast.connected'), 'success');
+      if (mode !== 'demo') toast(t('toast.connected'), 'success');
       await this.recs.refresh();
     } catch (e) {
       toast(t('toast.noAnswer'), 'error');
@@ -158,13 +174,22 @@ class App {
 
   onDisconnected() {
     if (!this.device) return;
-    const wasUsb = this.mode === 'usb';
+    const was = this.mode;
     this.device = this.info = this.status = this.mode = null;
     this.recList = [];
     this.runInfo = null;
-    if (wasUsb) toast(t('toast.disconnected'), 'info');
+    if (was !== 'demo') toast(t('toast.disconnected'), 'info');
+    if (was === 'wifi' && !this.userClosed) this.reconnectSoon();
     this.recs.reset();
     this.renderAll();
+  }
+
+  // Wi-Fi: out of range, device restarted... try again every 2 s until the user disconnects
+  reconnectSoon() {
+    clearTimeout(this.retryTimer);
+    this.retryTimer = setTimeout(() => {
+      if (!this.device && !this.userClosed) this.connect('wifi');
+    }, 2000);
   }
 
   onRecordingsListed(list) {
@@ -178,14 +203,14 @@ class App {
   renderDevice() {
     const el = $('#device');
     if (!this.device) {
-      const noSerial = !SerialTransport.supported();
+      const noSerial = !this.served && !SerialTransport.supported();
       el.innerHTML = `
         <div class="device-head">
           <div class="device-badge">${icon('plug', 17)}</div>
           <div><div class="device-title">${escapeHtml(t('device.title'))}</div><div class="device-sub">${escapeHtml(t('device.none'))}</div></div>
         </div>
         <div class="device-actions">
-          <button class="btn primary" data-action="connect" ${noSerial ? 'disabled' : ''}>${icon('plug', 16)}${escapeHtml(t('device.connect'))}</button>
+          <button class="btn primary" data-action="connect" ${noSerial ? 'disabled' : ''}>${icon('plug', 16)}${escapeHtml(t(this.served ? 'device.connectWifi' : 'device.connect'))}</button>
           ${this.demoAllowed ? `<button class="btn" data-action="demo">${icon('flask', 16)}${escapeHtml(t('device.demo'))}</button>` : ''}
         </div>`;
       return;
@@ -196,7 +221,7 @@ class App {
     el.innerHTML = `
       <div class="device-head">
         <div class="device-badge on">${icon(this.mode === 'demo' ? 'flask' : 'plug', 17)}</div>
-        <div><div class="device-title">${escapeHtml(t(this.mode === 'demo' ? 'device.connectedDemo' : 'device.connectedUsb'))}</div><div class="device-sub">${escapeHtml(sub)}</div></div>
+        <div><div class="device-title">${escapeHtml(t(this.mode === 'demo' ? 'device.connectedDemo' : this.mode === 'wifi' ? 'device.connectedWifi' : 'device.connectedUsb'))}</div><div class="device-sub">${escapeHtml(sub)}</div></div>
       </div>
       <div class="device-rows" id="deviceRows"></div>
       <div class="device-actions">
@@ -224,6 +249,7 @@ class App {
   onStatus(st) {
     const prev = this.status;
     this.status = st;
+    this.lastMsgMs = Date.now();
     this.debug?.onStatus(st);
     const changed = !prev || prev.state !== st.state || prev.rec !== st.rec || prev.session !== st.session;
     this.updateDeviceRows();
@@ -243,6 +269,9 @@ class App {
     let msg = '';
     if (this.device && st) {
       const silent = Math.round((Date.now() - this.lastDataMs) / 1000);
+      // Wi-Fi: a connection lost without notice (out of range) stays "open": start again.
+      // Status messages come every 0.5 s even when the measurements stop.
+      if (this.mode === 'wifi' && Date.now() - this.lastMsgMs >= 5000) this.device.close();
       if (st.acq_ok === false) msg = t('alert.stalled', { s: Math.max(1, silent) });
       else if (silent >= 2) msg = t('alert.noData', { s: silent });
       else if (st.faults?.length) msg = t('alert.faults', { list: st.faults.map((id) => channelName(CHANNELS.find((c) => c.id === id) || { id, name: id })).join(', ') });
@@ -543,7 +572,7 @@ class App {
   // ---- live data ----------------------------------------------------------------------------
 
   onData(samples) {
-    this.lastDataMs = Date.now();
+    this.lastDataMs = this.lastMsgMs = Date.now();
     this.debug?.onData(samples);
     if (!samples.length) return;
     for (const s of samples) {

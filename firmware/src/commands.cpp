@@ -5,6 +5,7 @@
 #include "acquisition.h"
 #include "commands.h"
 #include "link.h"
+#include "net.h"
 #include "recorder.h"
 #include "storage.h"
 
@@ -43,6 +44,7 @@ static void addStatus(JsonObject o) {
   o["clock"] = clockSynced();
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["uptime_s"] = millis() / 1000;
+  o["wifi_clients"] = netClients();
 }
 
 uint32_t diagLoopMaxMs = 0, diagAgeMaxMs = 0;
@@ -70,6 +72,7 @@ static void addInfo(JsonObject o) {
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["simulated"] = (bool)USE_SIMULATED_SENSORS;
   o["reset_reason"] = (int)esp_reset_reason();
+  o["wifi"] = netSsid();  // "" = Wi-Fi disabled
   JsonArray ch = o["channels"].to<JsonArray>();
   const char *ids[] = {"co2", "o2", "flow", "pressure"};
   const char *names[] = {"CO2", "O2", "Flow", "Pressure"};
@@ -105,7 +108,7 @@ static const char *cmdList(JsonVariantConst cmd, JsonObject reply) {
     count++;
     if (!metaLoad(name.c_str(), meta)) {
       o["error"] = "meta.json missing or damaged";
-      linkSendJson(item, true);
+      linkReplyJson(item);
       continue;
     }
     o["created"] = meta["created"];
@@ -120,7 +123,7 @@ static const char *cmdList(JsonVariantConst cmd, JsonObject reply) {
     o["sessions"] = meta["sessions"].size();
     o["duration_s"] = round3(total);
     if (lastMs) o["last_ms"] = lastMs;
-    linkSendJson(item, true);
+    linkReplyJson(item);
   }
   root.close();
   reply["count"] = count;
@@ -417,6 +420,6 @@ void commandsHandle(const char *line) {
 
   reply["ok"] = err == nullptr;
   if (err) reply["error"] = err;
-  linkSendJson(doc, true);
+  linkReplyJson(doc);
   if (stateChanged) sendStatus();
 }

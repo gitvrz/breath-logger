@@ -6,3 +6,4 @@ __pycache__/
 *:Zone.Identifier
 *.mp4
 jitter-*.csv
+firmware/src/webapp_files.h

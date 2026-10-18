@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "hal/usb_serial_jtag_ll.h"
 #include "link.h"
+#include "net.h"
 
 static char rxBuf[2048];
 static size_t rxLen = 0;
@@ -95,7 +96,12 @@ bool linkReadLine(char *out, size_t cap) {
   return false;
 }
 
-bool linkSend(const char *buf, size_t len, bool important) {
+// Who gets the replies of the command being handled: LINK_USB or a Wi-Fi client number
+static int replyTo = LINK_USB;
+
+void linkSetReplyTo(int channel) { replyTo = channel; }
+
+static bool usbSend(const char *buf, size_t len, bool important) {
   linkPump();
   if (len > sizeof(txq)) return false;
   uint32_t start = millis();
@@ -111,21 +117,42 @@ bool linkSend(const char *buf, size_t len, bool important) {
   return true;
 }
 
-bool linkSendJson(JsonDocument &doc, bool important) {
+// Live data, status and events: to the USB port and to every Wi-Fi client
+bool linkSend(const char *buf, size_t len, bool important) {
+  bool ok = usbSend(buf, len, important);
+  netBroadcast(buf, len);
+  return ok;
+}
+
+// Replies (and "item" messages): only to where the command came from
+static bool replySend(const char *buf, size_t len) {
+  if (replyTo == LINK_USB) return usbSend(buf, len, true);
+  return netSendTo(replyTo, buf, len);
+}
+
+// Serializes doc as one line and hands it to `out` (big documents go through the heap)
+template <typename Out>
+static bool sendJsonLine(JsonDocument &doc, Out out) {
   size_t n = measureJson(doc);
   if (n + 1 <= sizeof(txBuf)) {
     serializeJson(doc, txBuf, sizeof(txBuf));
     txBuf[n] = '\n';
-    return linkSend(txBuf, n + 1, important);
+    return out(txBuf, n + 1);
   }
   char *big = (char *)malloc(n + 2);
   if (!big) return false;
   serializeJson(doc, big, n + 1);
   big[n] = '\n';
-  bool ok = linkSend(big, n + 1, important);
+  bool ok = out(big, n + 1);
   free(big);
   return ok;
 }
+
+bool linkSendJson(JsonDocument &doc, bool important) {
+  return sendJsonLine(doc, [important](const char *b, size_t n) { return linkSend(b, n, important); });
+}
+
+bool linkReplyJson(JsonDocument &doc) { return sendJsonLine(doc, replySend); }
 
 void linkSendEvent(const char *level, const char *msg) {
   JsonDocument doc;

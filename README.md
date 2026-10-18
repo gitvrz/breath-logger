@@ -33,6 +33,20 @@ What the page does:
   erased**, and "Show all" brings it back), CSV download with an optional date/time column.
 - French / English, light / dark theme. Works offline (fonts and libraries are in `webapp/`).
 
+## Wi-Fi (prototype, branch `wifi-prototype`)
+
+The device also creates its own Wi-Fi network and serves the page itself, so any
+browser (also a tablet or phone) can be used without installing anything:
+
+1. Join the Wi-Fi network **BreathLogger-XXXX** (password `breathlogger`). Most systems
+   then open the page by themselves; otherwise open **http://192.168.4.1**.
+2. The page connects over Wi-Fi by itself and reconnects after a cut.
+
+USB keeps working at the same time. The page is built into the firmware
+(`firmware/embed_webapp.py` packs `webapp/` at every build), so it always matches it.
+The XIAO needs its antenna plugged in. Measure the link with
+`python tools/jitter.py --wifi 192.168.4.1` (from a computer on the device's network).
+
 ## Open the app like a program
 
 Double-click `launcher/Creer le raccourci.bat` once: it creates a **Breath Logger** shortcut
