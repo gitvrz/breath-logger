@@ -201,6 +201,14 @@ def main():
     if diags:
         keys = ["tx_max", "stall_max_ms", "loop_max_ms", "age_max_ms"]
         mx = {k: max(d.get(k, 0) for _, d in diags) for k in keys}
+        if a.wifi:
+            wk = ["wifi_send_max_ms", "wifi_dropped", "wifi_kicked"]
+            wmx = {k: max(d.get(k, 0) for _, d in diags) for k in wk}
+            print("\n4a. Device Wi-Fi counters (worst / total over the run):")
+            print(f"   wifi_send_max_ms {wmx['wifi_send_max_ms']:4} ms  slowest send to one client")
+            print(f"   wifi_dropped     {sum(d.get('wifi_dropped', 0) for _, d in diags):4}     messages not sent (a client not reading)")
+            print(f"   wifi_kicked      {sum(d.get('wifi_kicked', 0) for _, d in diags):4}     clients dropped (gone or too slow)")
+            print("   (below: USB counters, high values are normal when nothing reads the USB port)")
         print("\n4. Device counters (worst over the run):")
         print(f"   tx_max       {mx['tx_max']:6} bytes  waiting in the device's USB queue")
         print(f"   stall_max_ms {mx['stall_max_ms']:6} ms     bytes ready but the PC took nothing")

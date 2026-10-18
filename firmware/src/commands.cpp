@@ -62,6 +62,13 @@ void sendStatus(bool diag) {
     d["stall_max_ms"] = stallMax;
     d["loop_max_ms"] = diagLoopMaxMs;
     d["age_max_ms"] = diagAgeMaxMs;
+    if (netSsid()[0]) {
+      uint32_t sendMax, dropped, kicked;
+      netTakeStats(sendMax, dropped, kicked);
+      d["wifi_send_max_ms"] = sendMax;
+      d["wifi_dropped"] = dropped;
+      d["wifi_kicked"] = kicked;
+    }
     diagLoopMaxMs = diagAgeMaxMs = 0;
   }
   linkSendJson(doc, false);

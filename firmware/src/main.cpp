@@ -83,7 +83,12 @@ static void ioTask(void *) {
     if (turn - lastTurn > diagLoopMaxMs) diagLoopMaxMs = turn - lastTurn;
     lastTurn = turn;
     while (linkReadLine(line, sizeof(line))) commandsHandle(line);
-    netPoll();
+    int client;
+    while (netReadCommand(line, sizeof(line), &client)) {  // commands from Wi-Fi clients
+      linkSetReplyTo(client);  // the reply goes back to that client only
+      commandsHandle(line);
+      linkSetReplyTo(LINK_USB);
+    }
     recorderPoll();
     sendLive();
     watchAcquisition();

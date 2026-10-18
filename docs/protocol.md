@@ -9,7 +9,8 @@ Lines that don't start with `{` (e.g. ESP32 boot messages) must be ignored.
 The same messages go through a WebSocket at `ws://192.168.4.1:81/`, **one JSON object per
 WebSocket text message** (no `\n`). USB and several Wi-Fi clients work at the same time:
 a `reply` (and its `item`s) goes only to the client that sent the command; `data`,
-`status` and `event` go to everyone. Clients that stop answering pings are dropped after ~5 s.
+`status` and `event` go to everyone. A client that leaves the network, or does not read
+for 1 s, is dropped (the Wi-Fi runs in its own task: it never delays the recording or USB).
 
 ## PC → device: commands
 
@@ -73,7 +74,10 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
   `{"tx_max":420,"stall_max_ms":3,"loop_max_ms":6,"age_max_ms":4}`.
   `tx_max`: most bytes waiting in the device's USB queue; `stall_max_ms`: longest time bytes
   were ready but the PC took nothing; `loop_max_ms`: longest turn of the IO loop;
-  `age_max_ms`: oldest live sample when queued for USB. Shown by `tools/jitter.py` and by
+  `age_max_ms`: oldest live sample when queued for USB. With Wi-Fi: `wifi_send_max_ms`
+  (slowest send to one client), `wifi_dropped` (messages not sent: a client not reading or
+  the Wi-Fi queue full), `wifi_kicked` (clients dropped: gone from the network or not
+  reading for 1 s). Shown by `tools/jitter.py` and by
   the page opened with `index.html?debug`.
 
 ### `event` (asynchronous problems)

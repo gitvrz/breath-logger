@@ -4,6 +4,9 @@ const MAX_WINDOW_S = 60;
 // The live traces are drawn this late, so that samples arriving in batches every 100 ms
 // (plus USB jitter) are already there when the scrolling reaches them: smooth at 60 fps.
 const LIVE_DELAY_S = 0.2;
+// Wi-Fi delivers less regularly (measured: a few gaps of 150-450 ms in 5 min, e.g. when
+// the computer scans for networks): a bigger margin keeps the scrolling smooth.
+const LIVE_DELAY_WIFI_S = 0.5;
 
 class App {
   constructor() {
@@ -619,7 +622,8 @@ class App {
       // Follow changes gently (0.5 ms per frame) so the scrolling never jumps; snap on big changes
       if (this.lagMin == null || Math.abs(target - this.lagMin) > 1) this.lagMin = target;
       else this.lagMin += Math.max(-0.0005, Math.min(0.0005, target - this.lagMin));
-      this.liveStack.setView(performance.now() / 1000 - this.lagMin - LIVE_DELAY_S);
+      const delay = this.mode === 'wifi' ? LIVE_DELAY_WIFI_S : LIVE_DELAY_S;
+      this.liveStack.setView(performance.now() / 1000 - this.lagMin - delay);
       requestAnimationFrame(frame);
     };
     requestAnimationFrame(frame);

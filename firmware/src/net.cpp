@@ -3,11 +3,12 @@
 
 #if !WIFI_ENABLED
 void netBegin() {}
-void netPoll() {}
 void netBroadcast(const char *, size_t) {}
 bool netSendTo(int, const char *, size_t) { return false; }
+bool netReadCommand(char *, size_t, int *) { return false; }
 int netClients() { return 0; }
 const char *netSsid() { return ""; }
+void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { sendMaxMs = dropped = kicked = 0; }
 #else
 
 #include <Arduino.h>
@@ -15,29 +16,77 @@ const char *netSsid() { return ""; }
 #include <WebServer.h>
 #include <WebSocketsServer.h>
 #include <WiFi.h>
-#include "commands.h"
-#include "link.h"
+#include <atomic>
+#include <esp_netif.h>
+#include <esp_wifi.h>
+#include <lwip/sockets.h>
 #include "webapp_files.h"  // the web page, gzipped (generated from ../webapp at build time)
 
+// Sending to a client that left without closing its connection (Wi-Fi switched off, out
+// of range) blocks for up to ~10 s per message in the network libraries. So:
+//  - all the Wi-Fi work runs in this task, never in the IO task: the recording and USB
+//    never wait for Wi-Fi. Messages travel between the two tasks through queues.
+//  - nothing is sent to a client that cannot take data right now (checked without
+//    waiting); a client that cannot take data for 1 s, or whose send was slow, or whose
+//    station is no longer on the device's network (checked every second) is dropped.
+
+class WsServer : public WebSocketsServer {
+ public:
+  using WebSocketsServer::WebSocketsServer;
+  // Closes the connection without sending anything (a close message could block too)
+  void drop(uint8_t n) { clientDisconnect(&_clients[n]); }
+  bool up(uint8_t n) { return clientIsConnected(&_clients[n]); }
+  // Room in the connection's send buffer right now? (answers at once, never waits)
+  bool writable(uint8_t n) {
+    WiFiClient *c = _clients[n].tcp;
+    int fd = c ? c->fd() : -1;
+    if (fd < 0) return false;
+    fd_set set;
+    FD_ZERO(&set);
+    FD_SET(fd, &set);
+    timeval now = {0, 0};
+    return select(fd + 1, nullptr, &set, nullptr, &now) > 0;
+  }
+};
+
 static WebServer http(80);
-static WebSocketsServer ws(WS_PORT);
+static WsServer ws(WS_PORT);
 static DNSServer dns;
 static char ssid[32];
 
-// Messages are lines ending with '\n' over USB; over the WebSocket, one message = one line
-static size_t trimNewline(const char *line, size_t len) {
-  return len && line[len - 1] == '\n' ? len - 1 : len;
+struct NetMsg {
+  int16_t client;  // -1 = every client
+  uint16_t len;
+  char *data;      // malloc'ed copy, freed once sent
+};
+static QueueHandle_t outQ;  // IO task -> Wi-Fi: replies, live data, status, events
+static QueueHandle_t inQ;   // Wi-Fi -> IO task: command lines
+static std::atomic<int> clientCount{0};
+static uint32_t blockedSince[WEBSOCKETS_SERVER_CLIENT_MAX];  // 0 = client takes data
+static std::atomic<uint32_t> statSendMaxMs{0}, statDropped{0}, statKicked{0};
+
+static NetMsg copyMsg(int client, const char *line, size_t len) {
+  if (len && line[len - 1] == '\n') len--;  // one WebSocket message = one line
+  NetMsg m{(int16_t)client, (uint16_t)len, (char *)malloc(len + 1)};
+  if (m.data) {
+    memcpy(m.data, line, len);
+    m.data[len] = 0;
+  }
+  return m;
 }
 
+static bool queueMsg(QueueHandle_t q, const NetMsg &m, TickType_t wait = 0) {
+  if (m.data && xQueueSend(q, &m, wait) == pdTRUE) return true;
+  free(m.data);
+  statDropped++;  // queue full (Wi-Fi too slow): live data can be dropped, never the recording
+  return false;
+}
+
+// ---- Wi-Fi task --------------------------------------------------------------------
+
 static void onWs(uint8_t client, WStype_t type, uint8_t *payload, size_t len) {
-  if (type != WStype_TEXT) return;
-  static char line[2048];
-  size_t n = len < sizeof(line) - 1 ? len : sizeof(line) - 1;
-  memcpy(line, payload, n);
-  line[n] = 0;
-  linkSetReplyTo(client);  // the reply goes back to this client only
-  commandsHandle(line);
-  linkSetReplyTo(LINK_USB);
+  if (type == WStype_TEXT) queueMsg(inQ, copyMsg(client, (const char *)payload, len));
+  clientCount = ws.connectedClients();
 }
 
 // Files of the page. Anything else gets sent to the page: phones, tablets and Windows
@@ -57,36 +106,112 @@ static void onRequest() {
   http.send(302, "text/plain", "");
 }
 
+static void dropClient(uint8_t n) {
+  ws.drop(n);
+  blockedSince[n] = 0;
+  statKicked++;
+}
+
+static void sendOne(uint8_t n, NetMsg &m) {
+  if (!ws.up(n)) return;
+  if (!ws.writable(n)) {  // its buffer is full: it is not reading any more
+    if (!blockedSince[n]) blockedSince[n] = millis() | 1;
+    else if (millis() - blockedSince[n] > 1000) dropClient(n);
+    statDropped++;
+    return;
+  }
+  blockedSince[n] = 0;
+  uint32_t t = millis();
+  ws.sendTXT(n, (uint8_t *)m.data, m.len);
+  uint32_t ms = millis() - t;
+  if (ms > statSendMaxMs) statSendMaxMs = ms;
+  if (ms > 300) dropClient(n);  // a healthy client takes a few ms: this one is gone
+}
+
+// Drops the clients whose phone / computer is no longer on the device's network
+static void dropLeftStations() {
+  wifi_sta_list_t wl;
+  esp_netif_sta_list_t nl;
+  if (esp_wifi_ap_get_sta_list(&wl) != ESP_OK || esp_netif_get_sta_list(&wl, &nl) != ESP_OK) return;
+  for (uint8_t n = 0; n < WEBSOCKETS_SERVER_CLIENT_MAX; n++) {
+    if (!ws.up(n)) continue;
+    uint32_t ip = (uint32_t)ws.remoteIP(n);
+    bool present = false;
+    for (int i = 0; i < nl.num; i++) present |= nl.sta[i].ip.addr == ip;
+    if (!present) dropClient(n);
+  }
+}
+
+static void netTask(void *) {
+  uint32_t lastCheck = 0;
+  for (;;) {
+    dns.processNextRequest();
+    http.handleClient();
+    ws.loop();
+    NetMsg m;
+    while (xQueueReceive(outQ, &m, 0) == pdTRUE) {
+      if (m.client < 0) {
+        for (uint8_t n = 0; n < WEBSOCKETS_SERVER_CLIENT_MAX; n++) sendOne(n, m);
+      } else {
+        sendOne((uint8_t)m.client, m);
+      }
+      free(m.data);
+    }
+    if (millis() - lastCheck >= 1000) {
+      lastCheck = millis();
+      dropLeftStations();
+    }
+    clientCount = ws.connectedClients();
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+}
+
 void netBegin() {
+  outQ = xQueueCreate(48, sizeof(NetMsg));  // ~3 s of live data
+  inQ = xQueueCreate(8, sizeof(NetMsg));
   uint8_t mac[6];
   WiFi.softAPmacAddress(mac);
   snprintf(ssid, sizeof(ssid), WIFI_SSID_PREFIX "%02X%02X", mac[4], mac[5]);
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, WIFI_PASSWORD, WIFI_CHANNEL, 0, WIFI_MAX_CLIENTS);
-  dns.start(53, "*", WiFi.softAPIP());  // every name -> the device (captive portal)
+  esp_wifi_set_inactive_time(WIFI_IF_AP, 15);  // forget a silent station after 15 s (default 300)
+  dns.start(53, "*", WiFi.softAPIP());         // every name -> the device (captive portal)
   http.onNotFound(onRequest);
   http.begin();
   ws.begin();
   ws.onEvent(onWs);
-  // A client that went out of range is dropped after ~5 s instead of slowing every send
-  ws.enableHeartbeat(2000, 1500, 2);
+  // No library heartbeat: its pings are written without checking for room and could block
+  // ~10 s on a vanished client. A full buffer for 1 s or a station that left drops it instead.
+  // Below the IO task: SD writing and USB always come first
+  xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 3, nullptr, IO_CORE);
 }
 
-void netPoll() {
-  dns.processNextRequest();
-  http.handleClient();
-  ws.loop();
-}
+// ---- called from the IO task -----------------------------------------------------------
 
 void netBroadcast(const char *line, size_t len) {
-  if (ws.connectedClients() == 0) return;
-  ws.broadcastTXT((uint8_t *)line, trimNewline(line, len));
+  if (clientCount > 0) queueMsg(outQ, copyMsg(-1, line, len));
 }
 
+// Replies wait a little for room (like "important" messages over USB); live data never waits
 bool netSendTo(int client, const char *line, size_t len) {
-  return ws.sendTXT((uint8_t)client, (uint8_t *)line, trimNewline(line, len));
+  return queueMsg(outQ, copyMsg(client, line, len), pdMS_TO_TICKS(200));
 }
 
-int netClients() { return ws.connectedClients(); }
+bool netReadCommand(char *out, size_t cap, int *client) {
+  NetMsg m;
+  if (xQueueReceive(inQ, &m, 0) != pdTRUE) return false;
+  strlcpy(out, m.data, cap);
+  *client = m.client;
+  free(m.data);
+  return true;
+}
+
+int netClients() { return clientCount; }
 const char *netSsid() { return ssid; }
+
+void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) {
+  sendMaxMs = statSendMaxMs.exchange(0);
+  dropped = statDropped.exchange(0);
+  kicked = statKicked.exchange(0);
+}
 #endif
