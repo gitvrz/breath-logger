@@ -26,9 +26,11 @@ void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { se
 // of range) blocks for up to ~10 s per message in the network libraries. So:
 //  - all the Wi-Fi work runs in this task, never in the IO task: the recording and USB
 //    never wait for Wi-Fi. Messages travel between the two tasks through queues.
-//  - nothing is sent to a client that cannot take data right now (checked without
-//    waiting); a client that cannot take data for 1 s, or whose send was slow, or whose
-//    station is no longer on the device's network (checked every second) is dropped.
+//  - replies (a file being read, a list...) are never skipped: they wait for room in the
+//    client's connection. Live data is skipped for a client that cannot take it right now
+//    (checked without waiting): a busy but healthy client just misses a few live frames.
+//  - a client is dropped when it takes nothing for 3 s, or when its station is no longer
+//    on the device's network (checked every second).
 
 class WsServer : public WebSocketsServer {
  public:
@@ -59,8 +61,10 @@ struct NetMsg {
   uint16_t len;
   char *data;      // malloc'ed copy, freed once sent
 };
-static QueueHandle_t outQ;  // IO task -> Wi-Fi: replies, live data, status, events
-static QueueHandle_t inQ;   // Wi-Fi -> IO task: command lines
+static QueueHandle_t replyQ;  // IO task -> Wi-Fi: replies and "item"s, sent first, never skipped
+static QueueHandle_t outQ;    // IO task -> Wi-Fi: live data, status, events
+static QueueHandle_t inQ;     // Wi-Fi -> IO task: command lines
+static const uint32_t STUCK_MS = 3000;  // a client taking nothing for this long is gone
 static std::atomic<int> clientCount{0};
 static uint32_t blockedSince[WEBSOCKETS_SERVER_CLIENT_MAX];  // 0 = client takes data
 static std::atomic<uint32_t> statSendMaxMs{0}, statDropped{0}, statKicked{0};
@@ -112,20 +116,36 @@ static void dropClient(uint8_t n) {
   statKicked++;
 }
 
-static void sendOne(uint8_t n, NetMsg &m) {
-  if (!ws.up(n)) return;
-  if (!ws.writable(n)) {  // its buffer is full: it is not reading any more
-    if (!blockedSince[n]) blockedSince[n] = millis() | 1;
-    else if (millis() - blockedSince[n] > 1000) dropClient(n);
-    statDropped++;
-    return;
-  }
-  blockedSince[n] = 0;
+static void timedSend(uint8_t n, NetMsg &m) {
   uint32_t t = millis();
   ws.sendTXT(n, (uint8_t *)m.data, m.len);
   uint32_t ms = millis() - t;
   if (ms > statSendMaxMs) statSendMaxMs = ms;
-  if (ms > 300) dropClient(n);  // a healthy client takes a few ms: this one is gone
+  if (ms > STUCK_MS) dropClient(n);
+}
+
+// Live data, status, events: skipped if the client cannot take it right now
+static void sendLive(uint8_t n, NetMsg &m) {
+  if (!ws.up(n)) return;
+  if (!ws.writable(n)) {
+    if (!blockedSince[n]) blockedSince[n] = millis() | 1;
+    else if (millis() - blockedSince[n] > STUCK_MS) dropClient(n);
+    statDropped++;
+    return;
+  }
+  blockedSince[n] = 0;
+  timedSend(n, m);
+}
+
+// Replies: wait for room (a healthy client empties its buffer within milliseconds to a
+// second, even while downloading a file); only a client stuck for 3 s is given up
+static void sendReply(uint8_t n, NetMsg &m) {
+  uint32_t t = millis();
+  while (ws.up(n) && !ws.writable(n)) {
+    if (millis() - t > STUCK_MS) return dropClient(n);
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+  if (ws.up(n)) timedSend(n, m);
 }
 
 // Drops the clients whose phone / computer is no longer on the device's network
@@ -149,12 +169,12 @@ static void netTask(void *) {
     http.handleClient();
     ws.loop();
     NetMsg m;
-    while (xQueueReceive(outQ, &m, 0) == pdTRUE) {
-      if (m.client < 0) {
-        for (uint8_t n = 0; n < WEBSOCKETS_SERVER_CLIENT_MAX; n++) sendOne(n, m);
-      } else {
-        sendOne((uint8_t)m.client, m);
-      }
+    while (xQueueReceive(replyQ, &m, 0) == pdTRUE) {
+      sendReply((uint8_t)m.client, m);
+      free(m.data);
+    }
+    while (uxQueueMessagesWaiting(replyQ) == 0 && xQueueReceive(outQ, &m, 0) == pdTRUE) {
+      for (uint8_t n = 0; n < WEBSOCKETS_SERVER_CLIENT_MAX; n++) sendLive(n, m);
       free(m.data);
     }
     if (millis() - lastCheck >= 1000) {
@@ -167,6 +187,7 @@ static void netTask(void *) {
 }
 
 void netBegin() {
+  replyQ = xQueueCreate(16, sizeof(NetMsg));
   outQ = xQueueCreate(48, sizeof(NetMsg));  // ~3 s of live data
   inQ = xQueueCreate(8, sizeof(NetMsg));
   uint8_t mac[6];
@@ -192,9 +213,9 @@ void netBroadcast(const char *line, size_t len) {
   if (clientCount > 0) queueMsg(outQ, copyMsg(-1, line, len));
 }
 
-// Replies wait a little for room (like "important" messages over USB); live data never waits
+// Replies wait for room in their queue (like "important" messages over USB); live data never waits
 bool netSendTo(int client, const char *line, size_t len) {
-  return queueMsg(outQ, copyMsg(client, line, len), pdMS_TO_TICKS(200));
+  return queueMsg(replyQ, copyMsg(client, line, len), pdMS_TO_TICKS(500));
 }
 
 bool netReadCommand(char *out, size_t cap, int *client) {

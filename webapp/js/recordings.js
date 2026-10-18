@@ -525,12 +525,14 @@ class RecordingsPage {
     try {
       text = await this.fetchCsv(rec, session, (done, size) => (bar.style.width = `${size ? (100 * done) / size : 100}%`));
     } catch (e) {
+      // Back to the list, with nothing left half-open (the session can be opened again)
+      if (this.viewing?.rec === rec && this.viewing.session === session) this.viewing = null;
+      loading.hidden = true;
       toast(errText(e), 'error');
       return this.app.route('recordings');
-    } finally {
-      loading.hidden = true;
-      $('#viewMonitor').hidden = false;
     }
+    loading.hidden = true;
+    $('#viewMonitor').hidden = false;
     if (this.viewing?.rec !== rec || this.viewing.session !== session) return;
     this.viewing.series = buildSessionSeries(text, s, meta.rate_hz || 50);
     if (!this.viewer) this.viewer = new MonitorStack($('#viewMonitor'), { syncKey: 'viewer', onZoom: () => this.renderViewerButtons() });

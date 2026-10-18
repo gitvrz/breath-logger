@@ -58,7 +58,9 @@ class Device {
     return new Promise((resolve, reject) => {
       const onTimeout = () => {
         this.pending.delete(id);
-        reject(new Error(`the device did not answer "${cmd}"`));
+        const e = new Error(`the device did not answer "${cmd}"`);
+        e.timeout = true;
+        reject(e);
       };
       const timer = setTimeout(onTimeout, timeoutMs);
       this.pending.set(id, { resolve, reject, timer, onTimeout, timeoutMs, items: [] });
@@ -72,9 +74,16 @@ class Device {
 
   // Downloads a whole session CSV, a few 4 KB chunks at a time.
   // One chunk of a session file, checked against its length and CRC (asked again if damaged)
+  // A chunk that does not come (Wi-Fi hiccup) is asked again too, up to 3 times.
   async readChunk(rec, session, offset, len) {
     for (let attempt = 1; ; attempt++) {
-      const r = await this.request('read', { rec, session, offset, len }, 10000);
+      let r;
+      try {
+        r = await this.request('read', { rec, session, offset, len }, 10000);
+      } catch (e) {
+        if (!e.timeout || attempt === 3) throw e;
+        continue;
+      }
       if (r.crc == null || (r.data.length === r.n && crc32(r.data) === r.crc)) return r;
       if (attempt === 3) throw new Error('data corrupted during transfer');
     }
@@ -89,11 +98,17 @@ class Device {
     onProgress(done, size);
     const offsets = [];
     for (let o = CHUNK; o < size; o += CHUNK) offsets.push(o);
-    let next = 0;
+    let next = 0, failed = false;
     const worker = async () => {
-      while (next < offsets.length) {
+      while (!failed && next < offsets.length) {
         const i = next++;
-        const r = await this.readChunk(rec, session, offsets[i], CHUNK);
+        let r;
+        try {
+          r = await this.readChunk(rec, session, offsets[i], CHUNK);
+        } catch (e) {
+          failed = true; // the other workers stop asking
+          throw e;
+        }
         parts[i + 1] = r.data;
         done += r.data.length;
         onProgress(done, size);
