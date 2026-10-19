@@ -46,6 +46,9 @@ USB keeps working at the same time. The page is built into the firmware
 (`firmware/embed_webapp.py` packs `webapp/` at every build), so it always matches it.
 The XIAO needs its antenna plugged in. Measure the link with
 `python tools/jitter.py --wifi 192.168.4.1` (from a computer on the device's network).
+`python tools/wifitest.py` checks the Wi-Fi in about 1 minute (live data, two screens,
+a screen that stops reading during a recording, reading a file back): run it after any
+change to the Wi-Fi code.
 
 ## Open the app like a program
 

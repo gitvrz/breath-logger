@@ -51,8 +51,12 @@ class WifiReader:
     """Minimal WebSocket client (standard library only): receives the device's messages
     and answers its pings, so the device does not drop us as out of range."""
 
-    def __init__(self, host, port=81):
-        self.sock = socket.create_connection((host, port), timeout=5)
+    def __init__(self, host, port=81, rcvbuf=None):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        if rcvbuf:  # small receive buffer: lets wifitest.py play a client that stops reading
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
+        self.sock.settimeout(5)
+        self.sock.connect((host, port))
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.sendall((f"GET / HTTP/1.1\r\nHost: {host}:{port}\r\nUpgrade: websocket\r\n"
                            f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
@@ -71,8 +75,16 @@ class WifiReader:
 
     def send(self, opcode, payload=b""):
         mask = os.urandom(4)  # client frames must be masked
-        head = bytes([0x80 | opcode, 0x80 | len(payload)])  # control frames: < 126 bytes
+        n = len(payload)
+        if n < 126:
+            head = bytes([0x80 | opcode, 0x80 | n])
+        elif n < 65536:
+            head = bytes([0x80 | opcode, 0x80 | 126]) + struct.pack(">H", n)
+        else:
+            head = bytes([0x80 | opcode, 0x80 | 127]) + struct.pack(">Q", n)
+        self.sock.settimeout(5)
         self.sock.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+        self.sock.settimeout(0.002)
 
     def lines(self):
         try:
