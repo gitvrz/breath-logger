@@ -324,6 +324,13 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .notice.sim { background: var(--paused-soft); color: var(--paused); border: 1px solid var(--paused); }
 .mrow .sim-tag { display: none; }
 .monitor.simulated .mrow .sim-tag { display: inline-flex; }
+/* Wi-Fi, another screen has control: what would change something is greyed out */
+#liveControl .btn { margin-left: auto; }
+body.readonly :is(#btnStart, #btnPause, #btnStop, #btnNewRec, #btnTrim, #btnViewContinue, #btnTrash,
+  #recName, #sessNotes, #recNotes, #sessMode, [data-action="rename"], [data-action="delete"],
+  [data-action="new-session"], [data-action="continue"], [data-action="restore"], [data-action="delete-session"]) {
+  opacity: 0.45; pointer-events: none;
+}
 /* Live, mouse on the chart: the big value is from the past */
 .mrow .cursor-tag { display: none; }
 .mrow.at-cursor .cursor-tag { display: inline-flex; }

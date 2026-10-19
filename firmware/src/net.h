@@ -11,6 +11,9 @@ void netBroadcast(const char *line, size_t len);        // to every connected cl
 bool netSendTo(int client, const char *line, size_t len);
 bool netReadCommand(char *out, size_t cap, int *client); // next command line from Wi-Fi
 int netClients();                                       // connected WebSocket clients
+// Control with several screens: only the owner may change things (USB always may)
+int netOwner();                                         // -1: no screen has control
+void netTakeControl(int client);
 const char *netSsid();                                  // "" when Wi-Fi is disabled
 // Diagnostics since the last call: slowest send to a client, messages dropped because
 // the Wi-Fi queue was full, clients dropped (gone or too slow)

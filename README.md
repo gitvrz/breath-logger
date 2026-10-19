@@ -48,7 +48,12 @@ The XIAO needs its antenna plugged in. Measure the link with
 `python tools/jitter.py --wifi 192.168.4.1` (from a computer on the device's network).
 `python tools/wifitest.py` checks the Wi-Fi in about 1 minute (live data, two screens,
 a screen that stops reading during a recording, reading a file back): run it after any
-change to the Wi-Fi code.
+change to the Wi-Fi code. `python tools/soaktest.py --hours 2 --record` stays connected for
+hours and explains every cut (device restarted and why, device closed the connection, or
+the computer left the device's network).
+
+With several screens, only one controls the device (start, stop, change recordings); the
+others watch, with a **Take control** button.
 
 ## Open the app like a program
 

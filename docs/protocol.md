@@ -12,6 +12,14 @@ a `reply` (and its `item`s) goes only to the client that sent the command; `data
 `status` and `event` go to everyone. A client that leaves the network, or does not read
 for 1 s, is dropped (the Wi-Fi runs in its own task: it never delays the recording or USB).
 
+**Control with several screens**: only one Wi-Fi screen may change things (`start`, `pause`,
+`resume`, `stop`, `create`, `rename`, `delete`, `notes`, `trim`, `restore`, `empty_trash`);
+the others get `"error": "read-only: another screen has control"` and can only watch, list
+and read. The first screen to connect has control; when it leaves, the longest connected
+one gets it. `take_control` gives it to the screen that sends it. USB always may.
+The `hello` reply has `client` (this screen's number, -1 over USB); status `control` is the
+number of the screen that has control (-1: none).
+
 ## PC → device: commands
 
 Every command has `cmd` and an optional numeric `id`. The device answers each
@@ -21,6 +29,7 @@ command with exactly one `reply` carrying the same `id`.
 |---|---|---|---|
 | `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock. Send right after connecting. Reply contains `info` + `status`. |
 | `status` | – | yes | Reply contains `status`. |
+| `take_control` | – | yes | Wi-Fi: this screen gets control (see above). |
 | `start` | `rec`, `session` (`"new"` or a session id), `notes`? | – (idle only) | Creates the recording folder if needed. `session` = id → continue that session (append). |
 | `pause` | – | yes | Only when recording. |
 | `resume` | – | yes | Only when paused. |
@@ -61,7 +70,7 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
 {"type":"status","state":"idle|recording|paused","rec":"subject01","session":2,
  "t_s":12.34,"samples":617,"run_samples":617,"dropped":0,"live_dropped":0,
  "acq_ok":true,"faults":[],
- "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321,"wifi_clients":1}
+ "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321,"wifi_clients":1,"control":0}
 ```
 - `samples`: rows in the session file; `run_samples`: rows since the last `start` / `continue`.
 - `wifi_clients`: pages or tools connected over Wi-Fi (the `hello` reply's `info.wifi` is the network name, `""` when Wi-Fi is off).

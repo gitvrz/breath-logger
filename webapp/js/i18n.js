@@ -48,6 +48,11 @@ const I18N = {
     'live.max': 'max',
     'live.noSignal': 'Pas de signal',
     'live.cursorTag': 'Curseur',
+    'control.label': 'Commande',
+    'control.me': 'Cet écran',
+    'control.take': 'Prendre la main',
+    'control.other': 'Un autre écran commande l\'appareil : ici, vous pouvez regarder mais pas démarrer, arrêter ni modifier.',
+    'err.readonly': 'Un autre écran commande l\'appareil. Cliquez sur « Prendre la main » pour commander depuis celui-ci.',
     'live.cursorAgo': 'il y a {s} s · pas la valeur actuelle',
     'alert.stalled': 'Plus aucune mesure depuis {s} s : l\'acquisition est bloquée. Vérifiez les capteurs et leur câblage.',
     'alert.noData': 'Aucune donnée reçue de l\'appareil depuis {s} s. Vérifiez le câble USB.',
@@ -259,6 +264,11 @@ const I18N = {
     'live.max': 'max',
     'live.noSignal': 'No signal',
     'live.cursorTag': 'Cursor',
+    'control.label': 'Control',
+    'control.me': 'This screen',
+    'control.take': 'Take control',
+    'control.other': 'Another screen controls the device: here you can watch but not start, stop or change anything.',
+    'err.readonly': 'Another screen controls the device. Click "Take control" to control it from this one.',
     'live.cursorAgo': '{s} s ago · not the current value',
     'alert.stalled': 'No measurement for {s} s: acquisition is stalled. Check the sensors and their wiring.',
     'alert.noData': 'No data from the device for {s} s. Check the USB cable.',
@@ -461,7 +471,7 @@ function applyI18n(root = document) {
 function errText(e) {
   const m = String(e?.message ?? e);
   const map = [
-    ['busy', 'err.busy'], ['no SD card', 'err.noSd'], ['invalid range', 'err.range'], ['invalid', 'err.invalidName'],
+    ['read-only', 'err.readonly'], ['busy', 'err.busy'], ['no SD card', 'err.noSd'], ['invalid range', 'err.range'], ['invalid', 'err.invalidName'],
     ['nothing to keep', 'err.nothingKept'], ['too many trims', 'err.tooManyTrims'],
     ['already exists', 'err.exists'], ['recording not found', 'err.notFound'],
     ['clock not set', 'err.clock'], ['SD write failed', 'err.sdWrite'],

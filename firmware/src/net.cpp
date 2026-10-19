@@ -7,6 +7,8 @@ void netBroadcast(const char *, size_t) {}
 bool netSendTo(int, const char *, size_t) { return false; }
 bool netReadCommand(char *, size_t, int *) { return false; }
 int netClients() { return 0; }
+int netOwner() { return -1; }
+void netTakeControl(int) {}
 const char *netSsid() { return ""; }
 void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { sendMaxMs = dropped = kicked = 0; }
 #else
@@ -18,6 +20,7 @@ void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { se
 #include <WiFi.h>
 #include <atomic>
 #include <esp_netif.h>
+#include <esp_mac.h>
 #include <esp_wifi.h>
 #include <lwip/sockets.h>
 #include "webapp_files.h"  // the web page, gzipped (generated from ../webapp at build time)
@@ -66,6 +69,8 @@ static QueueHandle_t outQ;    // IO task -> Wi-Fi: live data, status, events
 static QueueHandle_t inQ;     // Wi-Fi -> IO task: command lines
 static const uint32_t STUCK_MS = 3000;  // a client taking nothing for this long is gone
 static std::atomic<int> clientCount{0};
+static std::atomic<int> owner{-1};  // the screen that has control (-1: none)
+static uint32_t connectedAt[WEBSOCKETS_SERVER_CLIENT_MAX];
 static uint32_t blockedSince[WEBSOCKETS_SERVER_CLIENT_MAX];  // 0 = client takes data
 static std::atomic<uint32_t> statSendMaxMs{0}, statDropped{0}, statKicked{0};
 
@@ -88,8 +93,21 @@ static bool queueMsg(QueueHandle_t q, const NetMsg &m, TickType_t wait = 0) {
 
 // ---- Wi-Fi task --------------------------------------------------------------------
 
+// Control: the first screen gets it; when it leaves, the longest connected one gets it
 static void onWs(uint8_t client, WStype_t type, uint8_t *payload, size_t len) {
-  if (type == WStype_TEXT) queueMsg(inQ, copyMsg(client, (const char *)payload, len));
+  if (type == WStype_TEXT) {
+    queueMsg(inQ, copyMsg(client, (const char *)payload, len));
+  } else if (type == WStype_CONNECTED) {
+    connectedAt[client] = millis();
+    if (owner < 0) owner = client;
+  } else if (type == WStype_DISCONNECTED) {
+    if (owner == client) {
+      int next = -1;
+      for (uint8_t n = 0; n < WEBSOCKETS_SERVER_CLIENT_MAX; n++)
+        if (n != client && ws.up(n) && (next < 0 || connectedAt[n] - connectedAt[next] > 0x80000000u)) next = n;
+      owner = next;
+    }
+  }
   clientCount = ws.connectedClients();
 }
 
@@ -191,7 +209,7 @@ void netBegin() {
   outQ = xQueueCreate(48, sizeof(NetMsg));  // ~3 s of live data
   inQ = xQueueCreate(8, sizeof(NetMsg));
   uint8_t mac[6];
-  WiFi.softAPmacAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);  // from the chip: valid before Wi-Fi starts
   snprintf(ssid, sizeof(ssid), WIFI_SSID_PREFIX "%02X%02X", mac[4], mac[5]);
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, WIFI_PASSWORD, WIFI_CHANNEL, 0, WIFI_MAX_CLIENTS);
@@ -228,6 +246,8 @@ bool netReadCommand(char *out, size_t cap, int *client) {
 }
 
 int netClients() { return clientCount; }
+int netOwner() { return owner; }
+void netTakeControl(int client) { owner = client; }
 const char *netSsid() { return ssid; }
 
 void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) {

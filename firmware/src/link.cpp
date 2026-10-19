@@ -100,6 +100,7 @@ bool linkReadLine(char *out, size_t cap) {
 static int replyTo = LINK_USB;
 
 void linkSetReplyTo(int channel) { replyTo = channel; }
+int linkReplyTo() { return replyTo; }
 
 static bool usbSend(const char *buf, size_t len, bool important) {
   linkPump();

@@ -7,7 +7,8 @@ Wi-Fi code. Takes about 1 minute.
 
 This computer must be on the device's Wi-Fi network (BreathLogger-XXXX). Checks:
  1. live data over Wi-Fi: 50 Hz, nothing missing, regular arrival
- 2. two screens at once: both get the live data, each gets only its own replies
+ 2. two screens at once: both get the live data, each gets only its own replies, only
+    the screen with control may change things
  3. a screen that stops reading while a recording runs: the device drops it, the other
     screen keeps getting live data, and the recording loses nothing
  4. reading the recorded file over Wi-Fi: every chunk checked (length + CRC), no sample missing
@@ -23,6 +24,26 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jitter import WifiReader  # noqa: E402
 
 REC = "wifitest"
+# esp_reset_reason(): why the device last restarted
+RESET = {0: "unknown", 1: "power on", 3: "software", 4: "crash", 5: "interrupt watchdog",
+         6: "task watchdog", 7: "other watchdog", 8: "deep sleep", 9: "power too low (brownout)",
+         10: "SDIO", 11: "USB", 12: "JTAG", 13: "eFuse", 14: "power glitch", 15: "CPU lock-up"}
+
+
+def explain_cut(host, up0):
+    """After a lost connection: did the device restart, or only drop this screen?"""
+    time.sleep(2)
+    try:
+        s = Screen(host, "check", 900000)
+        h = s.request("hello", time=int(time.time() * 1000))
+        s.close()
+    except (OSError, TimeoutError) as e:
+        return f"device not reachable any more ({e}): is this computer still on its Wi-Fi network?"
+    expected = up0[1] + (time.time() - up0[0])
+    if h["status"]["uptime_s"] + 5 < expected:
+        r = h["info"]["reset_reason"]
+        return f"the DEVICE RESTARTED (reason {r}: {RESET.get(r, '?')}), up for {h['status']['uptime_s']} s only"
+    return "the device did not restart: it closed this connection"
 
 
 class Screen:
@@ -91,10 +112,24 @@ def check(ok, label, detail=""):
 
 
 def main():
+    try:
+        run()
+    except (OSError, TimeoutError) as e:
+        print(f"\n  FAIL connection lost: {e}")
+        print("  ->", explain_cut(ARGS.host, UP0))
+        print("RESULT: FAIL")
+        sys.exit(1)
+
+
+ARGS = UP0 = None
+
+
+def run():
+    global ARGS, UP0
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="192.168.4.1")
     ap.add_argument("--keep", action="store_true", help="keep the test recording on the SD card")
-    a = ap.parse_args()
+    a = ARGS = ap.parse_args()
     ok = True
 
     print("1. Live data over Wi-Fi (5 s)")
@@ -102,6 +137,8 @@ def main():
     hello = s1.request("hello", time=int(time.time() * 1000))
     info, st = hello["info"], hello["status"]
     print(f"  firmware {info['fw']}, network {info.get('wifi')!r}, simulated={info['simulated']}, SD={st['sd']['ok']}")
+    print(f"  device up for {st['uptime_s']} s, last restart reason {info['reset_reason']} ({RESET.get(info['reset_reason'], '?')})")
+    UP0 = (time.time(), st["uptime_s"])
     t0 = time.perf_counter()
     s1.wait(5)
     rows = sum(x[2] for x in s1.arrivals)
@@ -119,6 +156,19 @@ def main():
         s2.wait(0.05)
     s1.request("status")
     s2.wait(0.5)
+    try:
+        s2.request("notes", rec=REC, notes="")
+        refused = False
+    except RuntimeError as e:
+        refused = "read-only" in str(e)
+    ok &= check(refused, "the second screen may only watch while the first has control")
+    s2.request("take_control")
+    try:
+        s1.request("notes", rec=REC, notes="")
+        refused = False
+    except RuntimeError as e:
+        refused = "read-only" in str(e)
+    ok &= check(refused, "after \"take control\" the first screen may only watch")
     n1 = sum(1 for x in s1.arrivals if x[0] >= t0)
     n2 = sum(1 for x in s2.arrivals if x[0] >= t0)
     ok &= check(n1 >= 20 and n2 >= 20, "both screens get the live data", f"{n1} and {n2} messages")

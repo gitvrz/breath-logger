@@ -18,6 +18,7 @@ bool linkSendJson(JsonDocument &doc, bool important);
 bool linkReplyJson(JsonDocument &doc);
 // Where replies go while a command is handled: LINK_USB or a Wi-Fi client number
 void linkSetReplyTo(int channel);
+int linkReplyTo();
 void linkSendEvent(const char *level, const char *msg);
 // Feeds queued bytes to the USB hardware. Call often; returns true if bytes are waiting.
 bool linkPump();

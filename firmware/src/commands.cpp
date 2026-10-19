@@ -45,6 +45,7 @@ static void addStatus(JsonObject o) {
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["uptime_s"] = millis() / 1000;
   o["wifi_clients"] = netClients();
+  o["control"] = netOwner();  // screen with control, -1: none
 }
 
 uint32_t diagLoopMaxMs = 0, diagAgeMaxMs = 0;
@@ -377,6 +378,12 @@ void commandsHandle(const char *line) {
 
   const char *err = nullptr;
   bool stateChanged = false;
+  // Several screens over Wi-Fi: only the one with control changes things (docs/protocol.md)
+  int from = linkReplyTo();
+  bool changes = !strcmp(c, "start") || !strcmp(c, "pause") || !strcmp(c, "resume") || !strcmp(c, "stop") ||
+                 !strcmp(c, "create") || !strcmp(c, "rename") || !strcmp(c, "delete") || !strcmp(c, "notes") ||
+                 !strcmp(c, "trim") || !strcmp(c, "restore") || !strcmp(c, "empty_trash");
+  if (from != LINK_USB && changes && netOwner() < 0) netTakeControl(from);  // nobody had it
   bool idle = recorderState() == RecState::Idle;
   bool needsSd = strcmp(c, "list") == 0 || strcmp(c, "get") == 0;
   bool idleOnly = strcmp(c, "create") == 0 || strcmp(c, "rename") == 0 || strcmp(c, "delete") == 0 ||
@@ -388,13 +395,18 @@ void commandsHandle(const char *line) {
   bool wantsSd = needsSd || idleOnly || !strcmp(c, "start") || !strcmp(c, "hello");
   if (wantsSd && idle && !storageOk()) storageMount();
 
-  if ((needsSd || idleOnly) && !storageOk()) err = "no SD card";
+  if (from != LINK_USB && changes && netOwner() != from) err = "read-only: another screen has control";
+  else if (!strcmp(c, "take_control")) {
+    if (from != LINK_USB) netTakeControl(from);
+    stateChanged = true;  // every screen learns who has control
+  } else if ((needsSd || idleOnly) && !storageOk()) err = "no SD card";
   else if (idleOnly && !idle) err = "busy: stop the recording first";
   else if (!strcmp(c, "hello")) {
     int64_t t = cmd["time"] | (int64_t)0;
     if (t > 0) clockSet(t);
     addInfo(reply["info"].to<JsonObject>());
     addStatus(reply["status"].to<JsonObject>());
+    reply["client"] = from;  // this screen's number (-1: USB), compared with status "control"
   } else if (!strcmp(c, "status")) {
     addStatus(reply["status"].to<JsonObject>());
   } else if (!strcmp(c, "start")) {

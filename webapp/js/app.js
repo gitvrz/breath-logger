@@ -48,8 +48,9 @@ class App {
 
     $$('.nav-item').forEach((b) => (b.onclick = () => this.route(b.dataset.route)));
     document.addEventListener('click', (e) => {
-      const a = e.target.closest('[data-action="connect"], [data-action="demo"], [data-action="disconnect"]');
+      const a = e.target.closest('[data-action="connect"], [data-action="demo"], [data-action="disconnect"], [data-action="take-control"]');
       if (!a || a.disabled) return;
+      if (a.dataset.action === 'take-control') return this.takeControl();
       if (a.dataset.action === 'connect') this.connect(this.netMode);
       else if (a.dataset.action === 'demo') this.connect('demo');
       else {
@@ -166,6 +167,7 @@ class App {
     try {
       const r = await device.request('hello', { time: Date.now() });
       this.info = r.info;
+      this.clientId = r.client; // Wi-Fi: this screen's number, compared with status.control
       this.onStatus(r.status);
       if (mode !== 'demo') toast(t('toast.connected'), 'success');
       await this.recs.refresh();
@@ -179,6 +181,7 @@ class App {
     if (!this.device) return;
     const was = this.mode;
     this.device = this.info = this.status = this.mode = null;
+    this.renderControl();
     this.recList = [];
     this.runInfo = null;
     if (was !== 'demo') toast(t('toast.disconnected'), 'info');
@@ -199,6 +202,34 @@ class App {
     this.recList = list;
     this.renderNav();
     if (this.transportMode === 'setup') this.updateSetup();
+  }
+
+  // ---- control with several screens (Wi-Fi) -------------------------------------------
+
+  // Over Wi-Fi only the screen with control may change things; the others watch.
+  // USB and demo always have control.
+  get hasControl() {
+    const c = this.status?.control;
+    return this.mode !== 'wifi' || c == null || c < 0 || c === this.clientId;
+  }
+
+  async takeControl() {
+    try {
+      await this.device.request('take_control');
+    } catch (e) {
+      toast(errText(e), 'error');
+    }
+  }
+
+  renderControl() {
+    const readonly = !!this.device && !this.hasControl;
+    document.body.classList.toggle('readonly', readonly);
+    const el = $('#liveControl');
+    el.hidden = !readonly;
+    if (readonly && el.dataset.on !== '1') {
+      el.innerHTML = `${icon('monitor', 18)}<span>${escapeHtml(t('control.other'))}</span><button class="btn sm" data-action="take-control">${escapeHtml(t('control.take'))}</button>`;
+    }
+    el.dataset.on = readonly ? '1' : '';
   }
 
   // ---- device panel (sidebar) -----------------------------------------------------
@@ -244,7 +275,8 @@ class App {
       ${sd.ok ? `<div class="gauge"><div style="width:${usedPct}%"></div></div>` : ''}
       <div class="drow ${st.clock ? '' : 'bad'}"><span>${escapeHtml(t('device.clock'))}</span><span>${escapeHtml(t(st.clock ? 'device.clockOk' : 'device.clockNo'))}</span></div>
       <div class="drow ${st.acq_ok === false ? 'bad' : ''}"><span>${escapeHtml(t('device.acq'))}</span><span>${escapeHtml(t(st.acq_ok === false ? 'device.acqStalled' : 'device.acqOk'))}</span></div>
-      <div class="drow ${st.dropped ? 'bad' : ''}"><span>${escapeHtml(t('device.lost'))}</span><span>${fmtNumber(st.dropped)}</span></div>`;
+      <div class="drow ${st.dropped ? 'bad' : ''}"><span>${escapeHtml(t('device.lost'))}</span><span>${fmtNumber(st.dropped)}</span></div>
+      ${this.mode === 'wifi' ? `<div class="drow"><span>${escapeHtml(t('control.label'))}</span><span>${this.hasControl ? escapeHtml(t('control.me')) : `<button class="btn ghost sm" data-action="take-control">${escapeHtml(t('control.take'))}</button>`}</span></div>` : ''}`;
   }
 
   // ---- status ----------------------------------------------------------------------
@@ -256,6 +288,7 @@ class App {
     this.debug?.onStatus(st);
     const changed = !prev || prev.state !== st.state || prev.rec !== st.rec || prev.session !== st.session;
     this.updateDeviceRows();
+    this.renderControl();
     this.liveStack.setFaults(st.faults || []);
     this.checkAlerts();
     if (changed) {
