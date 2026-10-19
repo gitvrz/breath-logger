@@ -73,6 +73,8 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
  "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321,"wifi_clients":1,"control":0}
 ```
 - `samples`: rows in the session file; `run_samples`: rows since the last `start` / `continue`.
+- `sd.retries` / `sd.recoveries`: SD writes tried again / card remounted during a recording,
+  since the device started (should stay 0). `diag.sd_slowest_ms`: slowest SD write or flush.
 - `wifi_clients`: pages or tools connected over Wi-Fi (the `hello` reply's `info.wifi` is the network name, `""` when Wi-Fi is off).
 - `dropped`: samples lost **for the SD recording** (should always be 0).
 - `live_dropped`: samples not sent to the PC (harmless, display only).
@@ -138,7 +140,10 @@ hours is normal).
 - `dropped` = samples lost because the SD card was too slow (should be 0).
 
 Event types: `start`, `pause`, `resume`, `stop`, `continue`,
-`lost` (with `n`: samples lost there), `stall` (acquisition stopped delivering samples).
+`lost` (with `n`: samples lost there), `stall` (acquisition stopped delivering samples),
+`sd_error` (the card refused a write: it was remounted and the recording went on; one
+row may be damaged there), `sd_failed` (the card kept refusing: the device stopped the
+recording there).
 A session without a final `stop` event was interrupted (power loss, reset); its CSV
 is still valid up to the last second before the interruption.
 

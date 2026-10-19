@@ -19,8 +19,7 @@ bool storageOk() { return mounted; }
 uint32_t storageTotalMb() { return totalMb; }
 uint32_t storageFreeMb() { return freeMb; }
 
-bool storageMount() {
-  if (mounted) return true;
+static bool beginCard() {
 #if SD_USE_SDMMC
 #if SD_MMC_4BIT
   SD_MMC.setPins(PIN_SD_CLK, PIN_SD_CMD, PIN_SD_D0, PIN_SD_D1, PIN_SD_D2, PIN_SD_D3);
@@ -37,13 +36,22 @@ bool storageMount() {
   }
   mounted = SD.begin(PIN_SD_D3, SPI, SD_SPI_FREQ);
 #endif
-  if (!mounted) {
-    SDCARD.end();
-    return false;
-  }
+  if (!mounted) SDCARD.end();
+  return mounted;
+}
+
+bool storageMount() {
+  if (mounted) return true;
+  if (!beginCard()) return false;
   if (!SDCARD.exists(REC_ROOT)) SDCARD.mkdir(REC_ROOT);
   storageRefreshSpace();
   return true;
+}
+
+bool storageRemount() {
+  SDCARD.end();
+  mounted = false;
+  return beginCard();  // keeps the last free space figures: no slow scan while recording
 }
 
 void storageMarkFailed() {

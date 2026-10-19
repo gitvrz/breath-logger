@@ -41,6 +41,8 @@ static void addStatus(JsonObject o) {
   sd["ok"] = storageOk();
   sd["total_mb"] = storageTotalMb();
   sd["free_mb"] = storageFreeMb();
+  sd["retries"] = recorderSdRetries();        // writes tried again since boot
+  sd["recoveries"] = recorderSdRecoveries();  // card remounted during a recording since boot
   o["clock"] = clockSynced();
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["uptime_s"] = millis() / 1000;
@@ -63,6 +65,7 @@ void sendStatus(bool diag) {
     d["stall_max_ms"] = stallMax;
     d["loop_max_ms"] = diagLoopMaxMs;
     d["age_max_ms"] = diagAgeMaxMs;
+    d["sd_slowest_ms"] = recorderTakeSdSlowestMs();
     if (netSsid()[0]) {
       uint32_t sendMax, dropped, kicked;
       netTakeStats(sendMax, dropped, kicked);

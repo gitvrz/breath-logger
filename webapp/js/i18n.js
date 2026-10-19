@@ -131,6 +131,10 @@ const I18N = {
     'detail.trimmedHelp': 'Une partie est masquée. Le fichier d\'origine reste intact sur la carte SD.',
     'detail.restore': 'Tout afficher',
     'detail.lost': '{n} échantillon perdu|{n} échantillons perdus',
+    'detail.sdFailed': 'Arrêtée : carte SD',
+    'detail.sdFailedHelp': 'La carte SD a refusé d\'écrire, même après plusieurs essais : l\'appareil a arrêté l\'enregistrement. Les données jusque-là sont conservées. Vérifiez ou changez la carte.',
+    'detail.sdError': 'Carte SD : {n} reprise|Carte SD : {n} reprises',
+    'detail.sdErrorHelp': 'La carte SD a refusé une écriture : l\'appareil l\'a relancée et l\'enregistrement a continué sans perte. Une ligne peut être abîmée à cet endroit.',
     'detail.lostHelp': 'Des mesures n\'ont pas pu être écrites à temps sur la carte SD. Les trous sont signalés sur les courbes.',
 
     'view.back': 'Enregistrements',
@@ -347,6 +351,10 @@ const I18N = {
     'detail.trimmedHelp': 'Part of it is hidden. The original file is untouched on the SD card.',
     'detail.restore': 'Show all',
     'detail.lost': '{n} lost sample|{n} lost samples',
+    'detail.sdFailed': 'Stopped: SD card',
+    'detail.sdFailedHelp': 'The SD card refused to write, even after several tries: the device stopped the recording. Data up to there is kept. Check or replace the card.',
+    'detail.sdError': 'SD card: {n} recovery|SD card: {n} recoveries',
+    'detail.sdErrorHelp': 'The SD card refused a write: the device restarted it and the recording went on without loss. One row may be damaged at that spot.',
     'detail.lostHelp': 'Some measurements could not be written to the SD card in time. The gaps are marked on the charts.',
 
     'view.back': 'Recordings',

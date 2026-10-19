@@ -21,6 +21,11 @@ int recorderSessionId();
 double recorderElapsedS();   // session time (t_s) now
 uint32_t recorderSamples();     // rows in the session file
 uint32_t recorderRunSamples();  // rows since the last start/continue
+// SD card health: writes tried again and card remounted since boot (see writeOut),
+// slowest write or flush since the last call
+uint32_t recorderSdRetries();
+uint32_t recorderSdRecoveries();
+uint32_t recorderTakeSdSlowestMs();
 
 // Adds an event (e.g. "stall") to the session being recorded, at the current time.
 void recorderNote(const char *type);

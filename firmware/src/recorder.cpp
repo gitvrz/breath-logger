@@ -24,6 +24,8 @@ static size_t wlen;
 static uint32_t lastFlushMs, lastMetaMs;
 static uint32_t droppedBase;     // samples lost in previous runs of this session
 static uint32_t droppedReported; // lost samples of this run already written as events
+static uint32_t sdRetries, sdRecoveries;  // since boot: writes tried again, card remounted
+static uint32_t sdSlowestMs;              // slowest write or flush since the last status
 
 static double round3(double v) { return round(v * 1000.0) / 1000.0; }
 static double nowTS() { return runOffsetS + (esp_timer_get_time() - runStartUs) / 1e6; }
@@ -45,9 +47,42 @@ static void updateSessionTotals() {
   s["dropped"] = droppedBase + acqRecordDropped();              // samples lost (SD too slow)
 }
 
+static void noteSdTime(uint32_t t0) {
+  uint32_t ms = millis() - t0;
+  if (ms > sdSlowestMs) sdSlowestMs = ms;
+}
+
+// The card keeps refusing: unmount and mount it again, reopen the session file at its end
+static bool reopenCsv() {
+  csv.close();
+  if (!storageRemount()) return false;
+  char path[80];
+  sessionPath(recName, sessionId, path, sizeof(path));
+  csv = sdFs().open(path, FILE_APPEND);
+  return (bool)csv;
+}
+
+// Writes the buffered rows. A refused write is tried again twice, then the card is
+// remounted and the file reopened (seen on hardware: a write refused after ~15 min of
+// recording). The 10 s sample queue absorbs the delay. The spot is marked "sd_error" in
+// meta.json: one row there may be damaged, everything before and after is intact.
 static bool writeOut() {
   if (wlen == 0) return true;
-  bool ok = csv.write((const uint8_t *)wbuf, wlen) == wlen;
+  uint32_t t0 = millis();
+  size_t done = 0;
+  for (int attempt = 0; done < wlen && attempt < 6; attempt++) {
+    if (attempt == 3) {
+      if (!reopenCsv()) break;
+      sdRecoveries++;
+      addEvent("sd_error", lastTS);
+    } else if (attempt > 0) {
+      sdRetries++;
+      vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    done += csv.write((const uint8_t *)wbuf + done, wlen - done);
+  }
+  noteSdTime(t0);
+  bool ok = done == wlen;
   wlen = 0;
   return ok;
 }
@@ -79,6 +114,12 @@ static bool drainQueue() {
 static void failRecording(const char *msg) {
   acqSetRecording(false);
   csv.close();
+  // Best effort: say in meta.json why the session ends here (else it looks like a power cut)
+  if (storageRemount()) {
+    addEvent("sd_failed", lastTS);
+    updateSessionTotals();
+    metaSave(recName, meta);
+  }
   storageMarkFailed();
   state = RecState::Idle;
   linkSendEvent("error", msg);
@@ -110,7 +151,9 @@ void recorderPoll() {
   if (now - lastFlushMs >= FLUSH_PERIOD_MS) {
     lastFlushMs = now;
     if (!writeOut()) return failRecording("SD write failed - recording stopped");
+    uint32_t t0 = millis();
     csv.flush();  // data is safe on the card even if power is cut
+    noteSdTime(t0);
   }
   if (now - lastMetaMs >= 30000) {  // keep totals roughly right in case of power cut
     lastMetaMs = now;
@@ -260,3 +303,10 @@ double recorderElapsedS() {
 }
 uint32_t recorderSamples() { return samples; }
 uint32_t recorderRunSamples() { return runSamples; }
+uint32_t recorderSdRetries() { return sdRetries; }
+uint32_t recorderSdRecoveries() { return sdRecoveries; }
+uint32_t recorderTakeSdSlowestMs() {
+  uint32_t ms = sdSlowestMs;
+  sdSlowestMs = 0;
+  return ms;
+}

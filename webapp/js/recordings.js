@@ -274,9 +274,14 @@ class RecordingsPage {
     const at = (tt) => s.start_ms + tt * 1000;
     const first = parts[0], last = parts[parts.length - 1];
     const pauses = parts.reduce((a, p) => a + p.pauses, 0);
+    const ev = s.events || [];
+    const sdFailed = ev.some((e) => e.type === 'sd_failed'); // the device stopped: card failed
+    const sdErrors = ev.filter((e) => e.type === 'sd_error').length; // card remounted, went on
     const tags = [
       live ? `<span class="tag live">${escapeHtml(t('detail.inProgress'))}</span>` : '',
-      !live && isInterrupted(s) ? `<span class="tag warn" title="${escapeHtml(t('detail.interruptedHelp'))}">${icon('alert', 12)}${escapeHtml(t('detail.interrupted'))}</span>` : '',
+      sdFailed ? `<span class="tag warn" title="${escapeHtml(t('detail.sdFailedHelp'))}">${icon('alert', 12)}${escapeHtml(t('detail.sdFailed'))}</span>` : '',
+      sdErrors ? `<span class="tag warn" title="${escapeHtml(t('detail.sdErrorHelp'))}">${icon('alert', 12)}${escapeHtml(t('detail.sdError', { n: sdErrors }))}</span>` : '',
+      !live && !sdFailed && isInterrupted(s) ? `<span class="tag warn" title="${escapeHtml(t('detail.interruptedHelp'))}">${icon('alert', 12)}${escapeHtml(t('detail.interrupted'))}</span>` : '',
       s.trims?.length ? `<span class="tag" title="${escapeHtml(t('detail.trimmedHelp'))}">${icon('scissors', 12)}${escapeHtml(t('detail.trimmed'))}</span>` : '',
       s.dropped > 0 ? `<span class="tag warn" title="${escapeHtml(t('detail.lostHelp'))}">${icon('alert', 12)}${escapeHtml(t('detail.lost', { n: fmtNumber(s.dropped) }))}</span>` : '',
     ].join('');

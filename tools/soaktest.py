@@ -32,13 +32,18 @@ class Soak:
         self.t0 = time.time()
         self.screen = None
         self.up = None            # (pc time, device uptime) at the last contact
-        self.connected_s = 0.0
         self.cuts = {"device restarted": 0, "device closed the connection": 0,
                      "computer off the device's network": 0, "no data any more": 0}
         self.big_gaps = []        # (elapsed, ms) live gaps > 1 s while connected
         self.kicked = 0           # other screens the device dropped
         self.last_contact = time.time()
         self.last_cut = None      # kind of the last cut, until we know whether it was a restart
+        self.down_since = None    # when the last cut happened
+        self.down_s = 0.0         # total time without a connection
+        self.recording = False    # our test recording should be running
+        self.rec_stopped_by_device = False
+        self.sd = {}              # last SD figures from the device status
+        self.sd_slowest = 0
 
     def event(self, kind, detail=""):
         el = time.time() - self.t0
@@ -49,7 +54,7 @@ class Soak:
         """Connects (retrying every 2 s) and tells whether the device restarted meanwhile."""
         while True:
             try:
-                s = Screen(self.host, "soak", 1)
+                s = Screen(self.host, "soak", 1, verbose=False)  # alerts go to the event log
                 h = s.request("hello", time=int(time.time() * 1000))
                 break
             except (OSError, TimeoutError) as e:
@@ -65,6 +70,9 @@ class Soak:
                 self.cuts["device restarted"] += 1
                 self.event("DEVICE RESTARTED", f"reason {r} ({RESET.get(r, '?')}), up for {st['uptime_s']} s")
         self.last_cut = None
+        if self.down_since:
+            self.down_s += time.time() - self.down_since
+            self.down_since = None
         self.up = (time.time(), st["uptime_s"])
         self.screen = s
         self.last_contact = time.time()
@@ -78,6 +86,7 @@ class Soak:
         except OSError:
             pass
         self.screen = None
+        self.down_since = time.time()
         # Windows: 10051/10065 = network unreachable, 10053 = this computer aborted the link
         if any(code in error for code in ("10051", "10053", "10065")) or "unreachable" in error.lower():
             self.last_cut = "computer off the device's network"
@@ -105,6 +114,7 @@ class Soak:
                 pass
             sid = self.screen.request("start", rec=REC, session="new")["session"]
             rec_t0 = time.time()
+            self.recording = True
             self.event("recording started", f"{REC} session {sid}")
         next_print = time.time() + 60
         minute_gap = 0.0
@@ -122,14 +132,25 @@ class Soak:
                 self.up = (now, s.status["uptime_s"])
             if len(s.arrivals) > before or s.status:
                 self.last_contact = now
+            for _, level, msg in s.events:
+                self.event(f"DEVICE {(level or 'event').upper()}", msg)
+            s.events.clear()
             if s.status:
-                self.kicked += (s.status.get("diag") or {}).get("wifi_kicked", 0)
+                diag = s.status.get("diag") or {}
+                self.kicked += diag.get("wifi_kicked", 0)
+                self.sd_slowest = max(self.sd_slowest, diag.get("sd_slowest_ms", 0))
+                sd = s.status.get("sd", {})
+                if sd.get("recoveries", 0) > self.sd.get("recoveries", 0) and self.sd:
+                    self.event("SD card remounted by the device", f"{sd['recoveries']} time(s) since it started")
+                self.sd = sd
+                if self.recording and s.status.get("state") == "idle" and not self.rec_stopped_by_device:
+                    self.rec_stopped_by_device = True
+                    self.event("RECORDING STOPPED BY THE DEVICE", f"SD ok={sd.get('ok')}")
                 s.status = None
             if now - self.last_contact > SILENT_S:
                 self.classify_cut("silent")
                 self.connect()
                 continue
-            self.connected_s += 0.2
             # live gaps over 1 s (connected but data late)
             arr = s.arrivals[max(0, before - 1):]
             for a, b in zip(arr, arr[1:]):
@@ -143,17 +164,21 @@ class Soak:
                 next_print += 60
                 el = (now - self.t0) / 60
                 cuts = sum(self.cuts.values())
-                print(f"  +{el:5.1f} min  connected, cuts so far {cuts}, longest gap this minute {minute_gap:.0f} ms")
+                rec = "" if not self.recording else (" recording STOPPED" if self.rec_stopped_by_device else " recording")
+                print(f"  +{el:5.1f} min  cuts so far {cuts}, longest gap this minute {minute_gap:.0f} ms,{rec}"
+                      f" SD slowest {self.sd_slowest} ms, SD retries {self.sd.get('retries', '-')}")
                 minute_gap = 0.0
 
         # ---- summary --------------------------------------------------------------------
         print("\nSummary")
         total = time.time() - self.t0
-        print(f"  duration {total / 3600:.2f} h, connected {100 * self.connected_s / total:.1f} % of the time")
+        print(f"  duration {total / 3600:.2f} h, connected {100 * (1 - self.down_s / total):.1f} % of the time")
         for k, v in self.cuts.items():
             print(f"  {k:36} {v}")
         print(f"  live gaps over 1 s while connected   {len(self.big_gaps)}")
         print(f"  other screens dropped by the device  {self.kicked}")
+        print(f"  SD card: slowest write {self.sd_slowest} ms, writes tried again {self.sd.get('retries', '-')},"
+              f" remounted {self.sd.get('recoveries', '-')} (since the device started)")
         ok = sum(self.cuts.values()) == 0 and not self.big_gaps
         if record:
             try:
@@ -167,6 +192,7 @@ class Soak:
 
     def check_recording(self, sid, rec_t0):
         """Stops the test recording and checks it lost nothing."""
+        self.recording = False
         if self.screen is None:
             self.connect()
         self.screen.request("take_control")
@@ -180,6 +206,14 @@ class Soak:
         print(f"  recording: {sess['samples']} rows ({sess['samples'] / 50 / 60:.1f} min), "
               f"lost {sess['dropped']}, events {sorted(set(ev))}")
         rec_ok = sess["dropped"] == 0 and "lost" not in ev and "stall" not in ev and sess["samples"] > 0.98 * expected
+        if "sd_error" in ev:
+            print(f"  the SD card refused a write {ev.count('sd_error')} time(s): remounted, recording went on")
+        if "sd_failed" in ev:
+            print("  the SD card failed for good: the device stopped the recording")
+            rec_ok = False
+        if self.rec_stopped_by_device:
+            print("  the device stopped the recording by itself during the test (see the events above)")
+            rec_ok = False
         if self.cuts["device restarted"]:
             print("  (the device restarted: the recording stopped there and shows as interrupted)")
         print(f"  recording {'OK' if rec_ok else 'NOT OK'}: expected about {expected:.0f} rows")

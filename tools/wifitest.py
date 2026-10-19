@@ -49,8 +49,9 @@ def explain_cut(host, up0):
 class Screen:
     """One web page / screen connected to the device over Wi-Fi."""
 
-    def __init__(self, host, name, id_base, rcvbuf=None):
+    def __init__(self, host, name, id_base, rcvbuf=None, verbose=True):
         self.name = name
+        self.verbose = verbose  # print the device's alerts as they come
         self.ws = WifiReader(host, rcvbuf=rcvbuf)
         self.next_id = id_base
         self.asked = set()
@@ -59,6 +60,7 @@ class Screen:
         self.arrivals = []  # (pc_s, last_t_ms, n_samples)
         self.status = None
         self.kicked = 0
+        self.events = []  # (pc_s, level, msg) alerts sent by the device
 
     def pump(self):
         for raw in self.ws.lines():
@@ -72,6 +74,10 @@ class Screen:
             elif t == "status":
                 self.status = m
                 self.kicked += (m.get("diag") or {}).get("wifi_kicked", 0)
+            elif t == "event":
+                self.events.append((time.perf_counter(), m.get("level"), m.get("msg")))
+                if self.verbose:
+                    print(f"  device event ({self.name}): {m.get('level')}: {m.get('msg')}")
             elif t == "reply":
                 if m.get("id") in self.asked:
                     self.replies[m["id"]] = m

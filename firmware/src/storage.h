@@ -11,6 +11,7 @@
 fs::FS &sdFs();
 bool storageMount();          // mount the card (safe to call again after a failure)
 void storageMarkFailed();     // call after a write error: unmount, retry later
+bool storageRemount();        // during a recording, after a write error: quick unmount + mount
 bool storageOk();
 void storageRefreshSpace();   // can take a moment on big cards: not while recording
 uint32_t storageTotalMb();
