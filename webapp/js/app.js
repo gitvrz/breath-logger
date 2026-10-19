@@ -25,6 +25,7 @@ class App {
     this.setup = { name: '', mode: 'new', session: null, notes: '' };
     this.lastDataMs = 0;
     this.debug = DebugPanel.wanted() ? new DebugPanel() : null; // index.html?debug
+    this.fw = new FirmwareUpdate(this);
     // Demo mode (fake device in the page) only with index.html?demo: for tests and showing the app
     this.demoAllowed = new URLSearchParams(location.search).has('demo');
 
@@ -48,9 +49,10 @@ class App {
 
     $$('.nav-item').forEach((b) => (b.onclick = () => this.route(b.dataset.route)));
     document.addEventListener('click', (e) => {
-      const a = e.target.closest('[data-action="connect"], [data-action="demo"], [data-action="disconnect"], [data-action="take-control"]');
+      const a = e.target.closest('[data-action="connect"], [data-action="demo"], [data-action="disconnect"], [data-action="take-control"], [data-action="firmware"]');
       if (!a || a.disabled) return;
       if (a.dataset.action === 'take-control') return this.takeControl();
+      if (a.dataset.action === 'firmware') return this.fw.open();
       if (a.dataset.action === 'connect') this.connect(this.netMode);
       else if (a.dataset.action === 'demo') this.connect('demo');
       else {
@@ -142,17 +144,18 @@ class App {
 
   // ---- connection --------------------------------------------------------------
 
-  async connect(mode) {
+  // port: a USB port already allowed (reconnecting after a restart). Returns true if connected.
+  async connect(mode, port = null) {
     if (this.device) await this.device.close();
     this.userClosed = false;
-    const transport = mode === 'demo' ? new MockTransport() : mode === 'wifi' ? new WsTransport() : new SerialTransport();
+    const transport = mode === 'demo' ? new MockTransport() : mode === 'wifi' ? new WsTransport() : new SerialTransport(port);
     const device = new Device(transport);
     try {
       await transport.open();
     } catch (e) {
       if (mode === 'wifi') this.reconnectSoon(); // device not reachable yet: try again quietly
-      else if (e.name !== 'NotFoundError') toast(t('toast.openFailed', { msg: e.message }), 'error'); // NotFoundError = window closed
-      return;
+      else if (!port && e.name !== 'NotFoundError') toast(t('toast.openFailed', { msg: e.message }), 'error'); // NotFoundError = window closed
+      return false;
     }
     this.device = device;
     this.mode = mode;
@@ -166,15 +169,31 @@ class App {
     device.on('close', () => this.onDisconnected());
     try {
       const r = await device.request('hello', { time: Date.now() });
+      if (mode !== 'demo' && this.fw.onHello(r.info)) return true; // new firmware: reloading the page
       this.info = r.info;
       this.clientId = r.client; // Wi-Fi: this screen's number, compared with status.control
       this.onStatus(r.status);
       if (mode !== 'demo') toast(t('toast.connected'), 'success');
       await this.recs.refresh();
     } catch (e) {
-      toast(t('toast.noAnswer'), 'error');
+      if (!this.fw.restarting) toast(t('toast.noAnswer'), 'error'); // restarting: it will come back
     }
     this.renderAll();
+    return true;
+  }
+
+  // After a firmware update over USB the device restarts and its USB port goes away for a
+  // moment. Open it again without asking: the browser keeps the permission meanwhile.
+  async reconnectUsbAfterRestart() {
+    this.device.transport.keepPort = true;
+    await sleep(4000); // restart 1.5 s after the reply, then the USB port comes back
+    if (this.device) await this.device.close(); // the port stayed: open it again to say hello
+    for (let i = 0; i < 40 && !this.device; i++) {
+      const ports = (await navigator.serial.getPorts()).filter((p) => p.getInfo().usbVendorId === 0x303a);
+      for (const p of ports) if (!this.device && (await this.connect('usb', p))) break;
+      if (!this.device) await sleep(1000);
+    }
+    if (!this.device) (await navigator.serial.getPorts()).forEach((p) => p.forget?.()); // as after a normal close
   }
 
   onDisconnected() {
@@ -184,7 +203,7 @@ class App {
     this.renderControl();
     this.recList = [];
     this.runInfo = null;
-    if (was !== 'demo') toast(t('toast.disconnected'), 'info');
+    if (was !== 'demo' && !this.fw.restarting) toast(t('toast.disconnected'), 'info');
     if (was === 'wifi' && !this.userClosed) this.reconnectSoon();
     this.recs.reset();
     this.renderAll();
@@ -259,6 +278,7 @@ class App {
       </div>
       <div class="device-rows" id="deviceRows"></div>
       <div class="device-actions">
+        ${this.mode !== 'demo' ? `<button class="btn ghost" data-action="firmware" id="btnFirmware">${icon('upload', 16)}${escapeHtml(t('fw.button'))}</button>` : ''}
         <button class="btn ghost" data-action="disconnect">${icon('logout', 16)}${escapeHtml(t('device.disconnect'))}</button>
       </div>`;
     this.updateDeviceRows();
@@ -276,7 +296,21 @@ class App {
       <div class="drow ${st.clock ? '' : 'bad'}"><span>${escapeHtml(t('device.clock'))}</span><span>${escapeHtml(t(st.clock ? 'device.clockOk' : 'device.clockNo'))}</span></div>
       <div class="drow ${st.acq_ok === false ? 'bad' : ''}"><span>${escapeHtml(t('device.acq'))}</span><span>${escapeHtml(t(st.acq_ok === false ? 'device.acqStalled' : 'device.acqOk'))}</span></div>
       <div class="drow ${st.dropped ? 'bad' : ''}"><span>${escapeHtml(t('device.lost'))}</span><span>${fmtNumber(st.dropped)}</span></div>
+      ${this.info?.wifi_channel ? `<div class="drow" title="${escapeHtml(this.wifiHelp())}"><span>Wi-Fi</span><span>${escapeHtml(t('wifi.channel', { ch: this.info.wifi_channel }))}</span></div>` : ''}
       ${this.mode === 'wifi' ? `<div class="drow"><span>${escapeHtml(t('control.label'))}</span><span>${this.hasControl ? escapeHtml(t('control.me')) : `<button class="btn ghost sm" data-action="take-control">${escapeHtml(t('control.take'))}</button>`}</span></div>` : ''}`;
+    // Firmware update: only from the screen with control, and not while recording
+    const fwBtn = $('#btnFirmware');
+    if (fwBtn) {
+      const why = !this.hasControl ? t('fw.needControl') : st.state !== 'idle' ? t('fw.needIdle') : '';
+      fwBtn.disabled = !!why;
+      fwBtn.title = why;
+    }
+  }
+
+  wifiHelp() {
+    const i = this.info;
+    const scan = (i.wifi_scan || []).map((c) => t('wifi.scanItem', { ch: c.channel, n: c.networks })).join(', ');
+    return t(scan ? 'wifi.channelAuto' : 'wifi.channelFixed', { ssid: i.wifi, ch: i.wifi_channel, scan });
   }
 
   // ---- status ----------------------------------------------------------------------

@@ -15,6 +15,11 @@ int netClients();                                       // connected WebSocket c
 int netOwner();                                         // -1: no screen has control
 void netTakeControl(int client);
 const char *netSsid();                                  // "" when Wi-Fi is disabled
+int netChannel();                                       // 0 until the network is up
+// What the channel choice heard at start: per candidate channel (1, 6, 11), networks
+// heard on it or next to it, and their crowding score (lowest wins)
+struct NetChannelScan { uint8_t channel; uint8_t networks; uint16_t score; };
+int netScan(const NetChannelScan **out);                 // number of entries (0: no scan)
 // Diagnostics since the last call: slowest send to a client, messages dropped because
 // the Wi-Fi queue was full, clients dropped (gone or too slow)
 void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked);

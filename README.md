@@ -55,6 +55,27 @@ the computer left the device's network).
 With several screens, only one controls the device (start, stop, change recordings); the
 others watch, with a **Take control** button.
 
+The device picks its Wi-Fi channel at each start: the least crowded of 1, 6 and 11 (the
+device panel shows it, hover for what it heard). Restart it to choose again.
+`WIFI_CHANNEL` in `config.h` forces one.
+
+## Update the firmware from the page
+
+Version 0.2.0 and later: **Update firmware** in the device panel (screen with control, no
+recording running) → choose `firmware.bin` → **Install**. About a minute over USB or Wi-Fi;
+the device restarts by itself and the page reconnects. If the new firmware does not start
+properly, the device goes back to the old one by itself. Details: `docs/protocol.md`.
+The first 0.2.0 must still be installed with `flash.bat` (USB); so does any firmware
+that breaks USB and Wi-Fi (hold BOOT while plugging in if needed).
+
+Test it on the device (1 to 3 minutes):
+```
+python tools/otatest.py --wifi 192.168.4.1 firmware/firmware.bin
+python tools/otatest.py COM5 firmware/firmware.bin --crash firmware/crash-test.bin
+```
+`--crash` also installs a firmware that crashes 5 s after starting (`pio run -e crash-test`)
+and checks that the device goes back to the previous one by itself.
+
 ## Open the app like a program
 
 Double-click `launcher/Creer le raccourci.bat` once: it creates a **Breath Logger** shortcut

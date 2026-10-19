@@ -10,10 +10,14 @@ The same messages go through a WebSocket at `ws://192.168.4.1:81/`, **one JSON o
 WebSocket text message** (no `\n`). USB and several Wi-Fi clients work at the same time:
 a `reply` (and its `item`s) goes only to the client that sent the command; `data`,
 `status` and `event` go to everyone. A client that leaves the network, or does not read
-for 1 s, is dropped (the Wi-Fi runs in its own task: it never delays the recording or USB).
+for 3 s, is dropped (the Wi-Fi runs in its own task: it never delays the recording or USB).
+Channel: with `WIFI_CHANNEL 0` the device listens to the networks around when it starts
+(~2 s, USB works meanwhile) and takes the least crowded of channels 1, 6 and 11. A network
+counts more when it is strong and on the same channel, less when up to 4 channels away.
 
 **Control with several screens**: only one Wi-Fi screen may change things (`start`, `pause`,
-`resume`, `stop`, `create`, `rename`, `delete`, `notes`, `trim`, `restore`, `empty_trash`);
+`resume`, `stop`, `create`, `rename`, `delete`, `notes`, `trim`, `restore`, `empty_trash`,
+and the firmware update `fw_*`);
 the others get `"error": "read-only: another screen has control"` and can only watch, list
 and read. The first screen to connect has control; when it leaves, the longest connected
 one gets it. `take_control` gives it to the screen that sends it. USB always may.
@@ -27,7 +31,7 @@ command with exactly one `reply` carrying the same `id`.
 
 | cmd | fields | allowed while recording | notes |
 |---|---|---|---|
-| `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock. Send right after connecting. Reply contains `info` + `status`. |
+| `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock. Send right after connecting. Reply contains `info` + `status`. `info`: `fw` (version), `build` (date + git commit, differs at every build), `rolled_back`, `rate_hz`, `simulated`, `reset_reason`, `wifi` (network name), `wifi_channel`, `wifi_scan` (per candidate channel: `channel`, `networks` heard, crowding `score`), `channels`. |
 | `status` | – | yes | Reply contains `status`. |
 | `take_control` | – | yes | Wi-Fi: this screen gets control (see above). |
 | `start` | `rec`, `session` (`"new"` or a session id), `notes`? | – (idle only) | Creates the recording folder if needed. `session` = id → continue that session (append). |
@@ -45,8 +49,33 @@ command with exactly one `reply` carrying the same `id`.
 | `restore` | `rec`, `session` | idle only | Cancels all trims of a session: every row is visible again. |
 | `trash` | – | idle only | Reply: `items`, `bytes` of the trash. |
 | `empty_trash` | – | idle only | Erases `/trash` for good. |
+| `fw_begin` | `size` (bytes) | idle only | Starts a firmware update (below). |
+| `fw_write` | `offset`, `crc`, `data` (base64, ≤ 2048 bytes) | – | Reply: `next` = where the next chunk starts. |
+| `fw_end` | – | – | Checks the whole file; the device restarts on it 1.5 s after the reply. |
+| `fw_abort` | – | – | Drops an update in progress (the running firmware is untouched). |
 
 Recording names: `[A-Za-z0-9_-]`, 1–32 characters. The device rejects anything else.
+
+### Firmware update (`fw_*`)
+
+Over USB or Wi-Fi, from the page (**Update firmware** in the device panel) or
+`tools/otatest.py`. The file goes to the *other* half of the flash (two 3.2 MB app slots):
+the running firmware is not touched until everything has arrived and been checked.
+
+1. `fw_begin` with the file size. Refused while recording (`start` is refused during an update).
+2. `fw_write` for each chunk, in order, from offset 0. The device decodes it and checks
+   its `crc` (CRC-32 as zlib) → `"firmware chunk damaged"`: send it again. A chunk sent
+   twice (its reply was lost) is not written twice: just continue from `next`.
+3. `fw_end`. Refused with `"not a Breath Logger firmware"` when the file has no
+   `#BreathLogger-firmware <version> <build>#` text (written into every firmware by
+   `firmware/build_info.py`); the ESP-IDF also checks the image (checksum, SHA-256, chip).
+   Then the device restarts on the new firmware.
+4. The new firmware starts "on probation": it is kept once a screen says `hello`, or
+   after it has run for a minute. If it restarts before (crash, watchdog), the bootloader
+   goes back to the previous firmware by itself and `info.rolled_back` becomes `true`.
+
+Nothing received for 30 s: the update is dropped (`event` warn). The page reconnects by
+itself after the restart (over Wi-Fi it then reloads: the new firmware brings its page).
 
 ## Device → PC: messages
 

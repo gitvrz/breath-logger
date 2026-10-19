@@ -570,3 +570,19 @@ dialog::backdrop { background: rgba(10, 10, 10, .38); backdrop-filter: blur(3px)
   .kpi { border-right: none; border-bottom: 1px solid var(--line); }
   .head-actions.wrap { justify-content: flex-start; }
 }
+
+/* ---- firmware update dialog ------------------------------------------------ */
+.fw-pick { display: block; cursor: pointer; }
+.fw-pick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.fw-pick > span {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-radius: 12px;
+  border: 1px dashed var(--line-strong); color: var(--ink-2); overflow-wrap: anywhere;
+}
+.fw-pick:hover > span, .fw-pick input:focus-visible + span { background: var(--surface-2); color: var(--ink); }
+.fw-pick input:disabled + span { opacity: .5; cursor: default; }
+.fw-file { color: var(--ink-2); margin: 0; }
+.fw-file:empty { display: none; }
+.fw-file.bad, .fw-warn { color: var(--rec); }
+.fw-progress { display: flex; flex-direction: column; gap: 8px; }
+.fw-progress .progress { width: 100%; }
+.fw-progress.bad .progress > div { background: var(--rec); }

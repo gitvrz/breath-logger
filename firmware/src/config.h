@@ -3,7 +3,7 @@
 // All the settings you are likely to change live here.
 // ---------------------------------------------------------------------------
 
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.2.0"
 
 // Acquisition rate. Must divide 1000 (50, 100, 125, 200, 250...).
 #define SAMPLE_RATE_HZ 50
@@ -39,7 +39,9 @@
 #define WIFI_ENABLED 1
 #define WIFI_SSID_PREFIX "BreathLogger-"    // + 4 hex digits of the device's MAC address
 #define WIFI_PASSWORD "breathlogger"         // prototype: the same for every device
-#define WIFI_CHANNEL 6
+// 0 = at each start, listen to the Wi-Fi networks around and take the least crowded of
+// channels 1, 6 and 11 (the three that do not overlap). Or a fixed channel, 1 to 13.
+#define WIFI_CHANNEL 0
 #define WIFI_MAX_CLIENTS 4
 #define WS_PORT 81                           // WebSocket (the page itself is on port 80)
 
@@ -63,5 +65,7 @@
 #define REC_NAME_MAX 32
 #define NOTES_MAX 500
 #define READ_CHUNK_MAX 4096
+#define OTA_CHUNK_MAX 2048             // firmware update: bytes per chunk (base64 in a JSON line)
+#define CMD_LINE_MAX 4096              // longest command line from the PC (a firmware chunk)
 
 static_assert(1000 % SAMPLE_RATE_HZ == 0, "SAMPLE_RATE_HZ must divide 1000");

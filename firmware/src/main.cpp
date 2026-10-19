@@ -11,6 +11,7 @@
 #include "config.h"
 #include "link.h"
 #include "net.h"
+#include "ota.h"
 #include "recorder.h"
 #include "sensors.h"
 #include "storage.h"
@@ -76,7 +77,7 @@ static void watchAcquisition() {
 }
 
 static void ioTask(void *) {
-  static char line[2048];
+  static char line[CMD_LINE_MAX];
   uint32_t lastStatus = 0, lastTurn = millis();
   for (;;) {
     uint32_t turn = millis();  // time between two turns: work + sleep
@@ -90,6 +91,7 @@ static void ioTask(void *) {
       linkSetReplyTo(LINK_USB);
     }
     recorderPoll();
+    otaPoll();
     sendLive();
     watchAcquisition();
 
@@ -113,5 +115,9 @@ void setup() {
 }
 
 void loop() {
+#if OTA_CRASH_TEST  // platformio.ini env "crash-test" only
+  delay(5000);
+  abort();
+#endif
   vTaskDelete(nullptr);  // everything runs in the two tasks above
 }

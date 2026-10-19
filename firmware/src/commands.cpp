@@ -6,13 +6,13 @@
 #include "commands.h"
 #include "link.h"
 #include "net.h"
+#include "ota.h"
 #include "recorder.h"
 #include "storage.h"
 
 static double round3(double v) { return round(v * 1000.0) / 1000.0; }
 
-// Standard CRC-32 (same as zlib / PNG), lets the PC check each chunk it reads
-static uint32_t crc32(const uint8_t *data, size_t n) {
+uint32_t crc32(const uint8_t *data, size_t n) {
   uint32_t crc = 0xFFFFFFFF;
   for (size_t i = 0; i < n; i++) {
     crc ^= data[i];
@@ -80,10 +80,24 @@ void sendStatus(bool diag) {
 
 static void addInfo(JsonObject o) {
   o["fw"] = FW_VERSION;
+  o["build"] = BUILD_ID;              // tells two builds of the same version apart
+  o["rolled_back"] = otaRolledBack(); // the last firmware update did not start: old one kept
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["simulated"] = (bool)USE_SIMULATED_SENSORS;
   o["reset_reason"] = (int)esp_reset_reason();
   o["wifi"] = netSsid();  // "" = Wi-Fi disabled
+  o["wifi_channel"] = netChannel();  // 0 = not started yet
+  const NetChannelScan *scan;
+  int n = netScan(&scan);  // how crowded each candidate channel was when the device started
+  if (n) {
+    JsonArray a = o["wifi_scan"].to<JsonArray>();
+    for (int i = 0; i < n; i++) {
+      JsonObject e = a.add<JsonObject>();
+      e["channel"] = scan[i].channel;
+      e["networks"] = scan[i].networks;
+      e["score"] = scan[i].score;
+    }
+  }
   JsonArray ch = o["channels"].to<JsonArray>();
   const char *ids[] = {"co2", "o2", "flow", "pressure"};
   const char *names[] = {"CO2", "O2", "Flow", "Pressure"};
@@ -385,7 +399,7 @@ void commandsHandle(const char *line) {
   int from = linkReplyTo();
   bool changes = !strcmp(c, "start") || !strcmp(c, "pause") || !strcmp(c, "resume") || !strcmp(c, "stop") ||
                  !strcmp(c, "create") || !strcmp(c, "rename") || !strcmp(c, "delete") || !strcmp(c, "notes") ||
-                 !strcmp(c, "trim") || !strcmp(c, "restore") || !strcmp(c, "empty_trash");
+                 !strcmp(c, "trim") || !strcmp(c, "restore") || !strcmp(c, "empty_trash") || !strncmp(c, "fw_", 3);
   if (from != LINK_USB && changes && netOwner() < 0) netTakeControl(from);  // nobody had it
   bool idle = recorderState() == RecState::Idle;
   bool needsSd = strcmp(c, "list") == 0 || strcmp(c, "get") == 0;
@@ -407,11 +421,14 @@ void commandsHandle(const char *line) {
   else if (!strcmp(c, "hello")) {
     int64_t t = cmd["time"] | (int64_t)0;
     if (t > 0) clockSet(t);
+    otaConfirm();  // a screen talks to this firmware: after an update, keep it
     addInfo(reply["info"].to<JsonObject>());
     addStatus(reply["status"].to<JsonObject>());
     reply["client"] = from;  // this screen's number (-1: USB), compared with status "control"
   } else if (!strcmp(c, "status")) {
     addStatus(reply["status"].to<JsonObject>());
+  } else if (!strcmp(c, "start") && otaBusy()) {
+    err = "a firmware update is in progress";
   } else if (!strcmp(c, "start")) {
     int sid = cmd["session"].is<int>() ? cmd["session"].as<int>() : -1;
     int out = 0;
@@ -438,6 +455,13 @@ void commandsHandle(const char *line) {
   else if (!strcmp(c, "restore")) err = cmdRestore(cmd);
   else if (!strcmp(c, "trash")) err = cmdTrash(reply);
   else if (!strcmp(c, "empty_trash")) err = cmdEmptyTrash();
+  else if (!strcmp(c, "fw_begin")) err = idle ? otaBegin(cmd["size"] | (uint32_t)0) : "busy: stop the recording first";
+  else if (!strcmp(c, "fw_write")) {
+    uint32_t next = 0;
+    err = otaWrite(cmd["offset"] | (uint32_t)0, cmd["data"] | "", cmd["crc"] | (uint32_t)0, next);
+    reply["next"] = next;
+  } else if (!strcmp(c, "fw_end")) err = otaEnd();
+  else if (!strcmp(c, "fw_abort")) otaAbort();
   else err = "unknown command";
 
   reply["ok"] = err == nullptr;

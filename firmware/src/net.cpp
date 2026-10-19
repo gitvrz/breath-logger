@@ -10,6 +10,8 @@ int netClients() { return 0; }
 int netOwner() { return -1; }
 void netTakeControl(int) {}
 const char *netSsid() { return ""; }
+int netChannel() { return 0; }
+int netScan(const NetChannelScan **) { return 0; }
 void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { sendMaxMs = dropped = kicked = 0; }
 #else
 
@@ -74,6 +76,9 @@ static std::atomic<int> owner{-1};  // the screen that has control (-1: none)
 static uint32_t connectedAt[WEBSOCKETS_SERVER_CLIENT_MAX];
 static uint32_t blockedSince[WEBSOCKETS_SERVER_CLIENT_MAX];  // 0 = client takes data
 static std::atomic<uint32_t> statSendMaxMs{0}, statDropped{0}, statKicked{0};
+static std::atomic<int> channel{0};
+static NetChannelScan scan[3];
+static std::atomic<int> scanCount{0};
 
 static NetMsg copyMsg(int client, const char *line, size_t len) {
   if (len && line[len - 1] == '\n') len--;  // one WebSocket message = one line
@@ -181,7 +186,48 @@ static void dropLeftStations() {
   }
 }
 
+// The least crowded of channels 1, 6 and 11. Networks on a channel up to 4 away still
+// overlap ours partly, and a strong (near) network disturbs more than a faint one.
+static int chooseChannel() {
+  static const uint8_t candidates[3] = {1, 6, 11};
+  WiFi.mode(WIFI_STA);
+  int n = WiFi.scanNetworks(false, true, false, 120);  // all channels, hidden ones too, ~2 s
+  if (n < 0) return 6;
+  for (int k = 0; k < 3; k++) scan[k] = {candidates[k], 0, 0};
+  for (int i = 0; i < n; i++) {
+    int strength = constrain(WiFi.RSSI(i) + 100, 0, 70);  // -30 dBm (close) = 70, -100 = 0
+    for (int k = 0; k < 3; k++) {
+      int d = abs(WiFi.channel(i) - candidates[k]);
+      if (d >= 5) continue;
+      scan[k].networks++;
+      scan[k].score += strength * (5 - d) / 5;  // same channel: all of it, 4 away: a fifth
+    }
+  }
+  WiFi.scanDelete();
+  scanCount = 3;
+  int best = 1;  // channel 6 on a tie: the usual default
+  for (int k = 0; k < 3; k++)
+    if (scan[k].score < scan[best].score) best = k;
+  return candidates[best];
+}
+
+static void startNetwork() {
+  int ch = WIFI_CHANNEL ? WIFI_CHANNEL : chooseChannel();
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, WIFI_PASSWORD, ch, 0, WIFI_MAX_CLIENTS);
+  esp_wifi_set_inactive_time(WIFI_IF_AP, 15);  // forget a silent station after 15 s (default 300)
+  dns.start(53, "*", WiFi.softAPIP());         // every name -> the device (captive portal)
+  http.onNotFound(onRequest);
+  http.begin();
+  ws.begin();
+  ws.onEvent(onWs);
+  // No library heartbeat: its pings are written without checking for room and could block
+  // ~10 s on a vanished client. A full buffer for 3 s or a station that left drops it instead.
+  channel = ch;
+}
+
 static void netTask(void *) {
+  startNetwork();  // here, not in setup(): the channel scan takes ~2 s, USB works meanwhile
   uint32_t lastCheck = 0;
   for (;;) {
     dns.processNextRequest();
@@ -213,16 +259,6 @@ void netBegin() {
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);  // from the chip: valid before Wi-Fi starts
   snprintf(ssid, sizeof(ssid), WIFI_SSID_PREFIX "%02X%02X", mac[4], mac[5]);
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, WIFI_PASSWORD, WIFI_CHANNEL, 0, WIFI_MAX_CLIENTS);
-  esp_wifi_set_inactive_time(WIFI_IF_AP, 15);  // forget a silent station after 15 s (default 300)
-  dns.start(53, "*", WiFi.softAPIP());         // every name -> the device (captive portal)
-  http.onNotFound(onRequest);
-  http.begin();
-  ws.begin();
-  ws.onEvent(onWs);
-  // No library heartbeat: its pings are written without checking for room and could block
-  // ~10 s on a vanished client. A full buffer for 1 s or a station that left drops it instead.
   // Below the IO task: SD writing and USB always come first
   xTaskCreatePinnedToCore(netTask, "net", 8192, nullptr, 3, nullptr, IO_CORE);
 }
@@ -251,6 +287,11 @@ int netClients() { return clientCount; }
 int netOwner() { return owner; }
 void netTakeControl(int client) { owner = client; }
 const char *netSsid() { return ssid; }
+int netChannel() { return channel; }
+int netScan(const NetChannelScan **out) {
+  *out = scan;
+  return scanCount;
+}
 
 void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) {
   sendMaxMs = statSendMaxMs.exchange(0);

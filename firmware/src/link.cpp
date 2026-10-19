@@ -1,9 +1,10 @@
 #include <Arduino.h>
 #include "hal/usb_serial_jtag_ll.h"
+#include "config.h"
 #include "link.h"
 #include "net.h"
 
-static char rxBuf[2048];
+static char rxBuf[CMD_LINE_MAX];
 static size_t rxLen = 0;
 static bool rxOverflow = false;
 

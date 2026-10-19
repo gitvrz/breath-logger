@@ -8,3 +8,4 @@ __pycache__/
 jitter-*.csv
 firmware/src/webapp_files.h
 soak-*.csv
+firmware/src/build_info.cpp

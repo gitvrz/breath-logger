@@ -6,10 +6,12 @@ class SerialTransport {
     return 'serial' in navigator;
   }
 
-  constructor() {
+  // port: one this page already has permission for (reconnecting after a restart)
+  constructor(port = null) {
     this.onMessage = () => {};
     this.onClose = () => {};
-    this.port = null;
+    this.port = port;
+    this.keepPort = false; // true: keep the permission when the port closes (device restarting)
     this.reader = null;
     this.writer = null;
     this.closing = false;
@@ -18,7 +20,7 @@ class SerialTransport {
 
   async open() {
     // Opens the browser's "choose a device" window
-    this.port = await navigator.serial.requestPort();
+    this.port ||= await navigator.serial.requestPort();
     await this.port.open({ baudRate: 115200, bufferSize: 65536 });
     // On the ESP32-S3 native USB port, some DTR/RTS combinations reset the chip.
     // Keep both low so connecting never interrupts a recording.
@@ -64,7 +66,7 @@ class SerialTransport {
       }
     }
     if (!this.closing) {
-      this.port.forget?.().catch(() => {});
+      if (!this.keepPort) this.port.forget?.().catch(() => {});
       this.onClose(); // unplugged
     }
   }
@@ -80,7 +82,7 @@ class SerialTransport {
       if (this.writer) this.writer.releaseLock();
       await this.port.close();
       // Remove Chrome's permission: another local page can't reuse it silently
-      if (this.port.forget) await this.port.forget();
+      if (this.port.forget && !this.keepPort) await this.port.forget();
     } catch (e) {
       console.warn(e);
     }
