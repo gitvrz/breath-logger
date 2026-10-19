@@ -2,9 +2,12 @@
 """Test of the firmware update from the page, without the browser (same commands).
 Takes 1 to 3 minutes.
 
-    python tools/otatest.py --wifi 192.168.4.1 firmware/firmware.bin
-    python tools/otatest.py COM5 firmware/firmware.bin          (USB: close the page first)
-    python tools/otatest.py --wifi 192.168.4.1 firmware/firmware.bin --crash firmware/crash-test.bin
+    python tools/otatest.py --wifi 192.168.4.1 firmware/firmware-next.bin
+    python tools/otatest.py COM5 firmware/firmware-next.bin          (USB: close the page first)
+    python tools/otatest.py --wifi 192.168.4.1 firmware/firmware-next.bin --crash firmware/crash-test.bin
+
+Give a build other than the one running (firmware-next.bin = the same code built again),
+otherwise step 3 cannot see a change.
 
 Checks:
  1. a file that is not a Breath Logger firmware is refused, the device keeps working
@@ -143,6 +146,9 @@ def main():
     print(f"Device: firmware {info['fw']} build {info.get('build', '?')}, Wi-Fi channel {info.get('wifi_channel')}")
     for c in info.get("wifi_scan", []):
         print(f"  channel {c['channel']:2}: {c['networks']} network(s) heard, crowding {c['score']}")
+    if info.get("build") == want:
+        print(f"  WARNING: the device already runs this build: step 3 cannot tell whether the update"
+              f" happened. Use another build (e.g. firmware-next.bin).")
     if st["state"] != "idle":
         sys.exit("A recording is running: stop it first.")
     link.request("take_control")

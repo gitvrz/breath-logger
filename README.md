@@ -70,10 +70,11 @@ that breaks USB and Wi-Fi (hold BOOT while plugging in if needed).
 
 Test it on the device (1 to 3 minutes):
 ```
-python tools/otatest.py --wifi 192.168.4.1 firmware/firmware.bin
-python tools/otatest.py COM5 firmware/firmware.bin --crash firmware/crash-test.bin
+python tools/otatest.py --wifi 192.168.4.1 firmware/firmware-next.bin
+python tools/otatest.py COM5 firmware/firmware-next.bin --crash firmware/crash-test.bin
 ```
-`--crash` also installs a firmware that crashes 5 s after starting (`pio run -e crash-test`)
+`firmware-next.bin` is the same code built again: a build other than the running one, so
+the test sees the change. `--crash` also installs a firmware that crashes 5 s after starting (`pio run -e crash-test`)
 and checks that the device goes back to the previous one by itself.
 
 ## Open the app like a program
