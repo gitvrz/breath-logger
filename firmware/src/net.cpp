@@ -19,6 +19,7 @@ void netTakeStats(uint32_t &sendMaxMs, uint32_t &dropped, uint32_t &kicked) { se
 #include <WebSocketsServer.h>
 #include <WiFi.h>
 #include <atomic>
+#include <errno.h>
 #include <esp_netif.h>
 #include <esp_mac.h>
 #include <esp_wifi.h>
@@ -184,6 +185,7 @@ static void netTask(void *) {
   uint32_t lastCheck = 0;
   for (;;) {
     dns.processNextRequest();
+    errno = 0;  // WiFiClient::connected() (web server) trusts errno: see lib/WebSockets/PATCHED.md
     http.handleClient();
     ws.loop();
     NetMsg m;
