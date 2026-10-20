@@ -9,3 +9,7 @@ jitter-*.csv
 firmware/src/webapp_files.h
 soak-*.csv
 firmware/src/build_info.cpp
+
+# Python environment for PlatformIO (docs/development.md), package output
+.venv/
+dist/

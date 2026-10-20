@@ -4,7 +4,7 @@ Transport: USB serial (CDC). Baud rate is ignored by native USB but use 115200.
 Encoding: **one JSON object per line** (`\n` terminated), UTF-8, both directions.
 Lines that don't start with `{` (e.g. ESP32 boot messages) must be ignored.
 
-**Wi-Fi (prototype, `WIFI_ENABLED` in `config.h`)**: the device creates the network
+**Wi-Fi (`WIFI_ENABLED` in `config.h`)**: the device creates the network
 `BreathLogger-XXXX` (password `breathlogger`) and serves the page at `http://192.168.4.1/`.
 The same messages go through a WebSocket at `ws://192.168.4.1:81/`, **one JSON object per
 WebSocket text message** (no `\n`). USB and several Wi-Fi clients work at the same time:

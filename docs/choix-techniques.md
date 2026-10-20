@@ -91,8 +91,8 @@ Un glossaire des termes techniques est à la fin.
     les utiliser ;
   - le fichier de configuration PlatformIO garde le profil « DevKitC » : sans effet sur
     le fonctionnement ;
-  - la section « Flash the device » du README décrit encore la DevKitC et PlatformIO. Elle
-    est à mettre à jour (on flashe aujourd'hui avec `flash.bat`).
+  - le README et `docs/development.md` décrivent la XIAO et `flash.bat` (la mention de la
+    DevKitC a été retirée le 20 octobre 2026).
 - **Statut** : ✅ la carte tourne avec le firmware.
 
 ### C2 · Carte SD branchée en SPI
@@ -545,8 +545,10 @@ Un glossaire des termes techniques est à la fin.
     (C42) ;
   - les fichiers sont recopiés dans `C:\Users\vince\BreathLogger` ;
   - un Python portable y est inclus pour les outils de test.
-- **Conséquences** : penser à recopier après chaque modification. `flash.bat` n'est pas encore
-  dans Git.
+- **Conséquences** : le dossier Windows n'est plus recopié à la main. `package/package.py`
+  le fabrique (firmware compilé, page, outils, `esptool.exe` et Python portable téléchargés
+  en versions fixées), et `--out` met à jour le dossier existant. `flash.bat` est dans Git
+  (`package/flash.bat`). Détails dans `docs/development.md`.
 - **Statut** : ✅.
 
 ### C33 · Outils de test
