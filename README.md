@@ -56,7 +56,8 @@ With several screens, only one controls the device (start, stop, change recordin
 others watch, with a **Take control** button.
 
 The device picks its Wi-Fi channel at each start: the least crowded of 1, 6 and 11 (the
-device panel shows it, hover for what it heard). Restart it to choose again.
+device panel shows it, hover for what it heard). Unplug it (or switch it off) to choose
+again: after a firmware update it keeps its channel, so its network comes back sooner.
 `WIFI_CHANNEL` in `config.h` forces one.
 
 ## Update the firmware from the page

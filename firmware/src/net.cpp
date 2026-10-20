@@ -79,6 +79,10 @@ static std::atomic<uint32_t> statSendMaxMs{0}, statDropped{0}, statKicked{0};
 static std::atomic<int> channel{0};
 static NetChannelScan scan[3];
 static std::atomic<int> scanCount{0};
+// Kept across a restart (not across a power cut): the channel chosen at power-on and its scan
+struct KeptChannel { uint32_t magic; int channel; NetChannelScan scan[3]; };
+static RTC_NOINIT_ATTR KeptChannel kept;
+static const uint32_t KEPT_MAGIC = 0xB4EA7C11;
 
 static NetMsg copyMsg(int client, const char *line, size_t len) {
   if (len && line[len - 1] == '\n') len--;  // one WebSocket message = one line
@@ -211,8 +215,26 @@ static int chooseChannel() {
   return candidates[best];
 }
 
+// After a restart (firmware update, crash) the channel of before, without scanning again:
+// the network is back ~2 s sooner, and a computer that waits for it often rejoins by itself.
+// At power-on (unplugged, battery) a new choice.
+static int keptOrChosenChannel() {
+  esp_reset_reason_t why = esp_reset_reason();
+  if (why != ESP_RST_POWERON && why != ESP_RST_BROWNOUT && kept.magic == KEPT_MAGIC &&
+      kept.channel >= 1 && kept.channel <= 13) {
+    memcpy(scan, kept.scan, sizeof scan);
+    scanCount = 3;
+    return kept.channel;
+  }
+  int ch = chooseChannel();
+  kept.channel = ch;
+  memcpy(kept.scan, scan, sizeof scan);
+  kept.magic = KEPT_MAGIC;
+  return ch;
+}
+
 static void startNetwork() {
-  int ch = WIFI_CHANNEL ? WIFI_CHANNEL : chooseChannel();
+  int ch = WIFI_CHANNEL ? WIFI_CHANNEL : keptOrChosenChannel();
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid, WIFI_PASSWORD, ch, 0, WIFI_MAX_CLIENTS);
   esp_wifi_set_inactive_time(WIFI_IF_AP, 15);  // forget a silent station after 15 s (default 300)

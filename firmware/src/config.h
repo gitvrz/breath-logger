@@ -39,7 +39,7 @@
 #define WIFI_ENABLED 1
 #define WIFI_SSID_PREFIX "BreathLogger-"    // + 4 hex digits of the device's MAC address
 #define WIFI_PASSWORD "breathlogger"         // prototype: the same for every device
-// 0 = at each start, listen to the Wi-Fi networks around and take the least crowded of
+// 0 = at each power-on, listen to the Wi-Fi networks around and take the least crowded of
 // channels 1, 6 and 11 (the three that do not overlap). Or a fixed channel, 1 to 13.
 #define WIFI_CHANNEL 0
 #define WIFI_MAX_CLIENTS 4

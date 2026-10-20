@@ -14,6 +14,8 @@ for 3 s, is dropped (the Wi-Fi runs in its own task: it never delays the recordi
 Channel: with `WIFI_CHANNEL 0` the device listens to the networks around when it starts
 (~2 s, USB works meanwhile) and takes the least crowded of channels 1, 6 and 11. A network
 counts more when it is strong and on the same channel, less when up to 4 channels away.
+After a restart without a power cut (firmware update, crash) it keeps the channel of before
+and skips the scan, so its network is back sooner.
 
 **Control with several screens**: only one Wi-Fi screen may change things (`start`, `pause`,
 `resume`, `stop`, `create`, `rename`, `delete`, `notes`, `trim`, `restore`, `empty_trash`,
