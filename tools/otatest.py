@@ -15,14 +15,15 @@ Checks:
  3. the firmware is installed: the device restarts on it (same build as the file)
  4. (--crash) a firmware that crashes after starting: the device goes back by itself
     to the firmware of step 3. crash-test.bin = "pio run -e crash-test" (platformio.ini).
-Over Wi-Fi, this computer must rejoin the device's network after each restart (Windows
-does it by itself for a known network).
+Over Wi-Fi, this computer must rejoin the device's network after each restart: on Windows
+the script asks it to (netsh), as Windows often stays off it or picks another known network.
 """
 import argparse
 import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import zlib
@@ -73,17 +74,32 @@ class Link:
             pass
 
 
+def rejoin_wifi(ssid):
+    """Windows: asks to join the device's network again (known network, saved by Windows
+    the first time). Does nothing elsewhere: join it by hand."""
+    if os.name != "nt" or not ssid:
+        return
+    subprocess.run(["netsh", "wlan", "connect", f"name={ssid}"], capture_output=True)
+
+
 def connect(a, wait_s=0):
     """Connects and says hello; keeps trying for wait_s seconds (device restarting)."""
     end = time.time() + wait_s
+    asked = 0
     while True:
         try:
             link = Link(a)
             h = link.request("hello", timeout=5, time=int(time.time() * 1000))
+            a.ssid = h["info"].get("wifi") or getattr(a, "ssid", "")
             return link, h["info"], h["status"]
         except Exception as e:  # noqa: BLE001 (port gone, network gone, no answer...)
             if time.time() >= end:
                 raise TimeoutError(f"device not back after {wait_s} s ({e})")
+            if a.wifi and time.time() - asked > 8:  # the device's network is back after ~5 s
+                if not asked and os.name == "nt":
+                    print(f"  asking Windows to rejoin {a.ssid}...")
+                asked = time.time()
+                rejoin_wifi(getattr(a, "ssid", ""))
             time.sleep(2)
 
 
