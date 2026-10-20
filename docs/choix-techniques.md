@@ -1,6 +1,6 @@
 # Breath Logger : choix techniques
 
-État au 15 octobre 2026. Ce document rassemble toutes les décisions techniques du projet,
+État au 20 octobre 2026. Ce document rassemble toutes les décisions techniques du projet,
 pour pouvoir les présenter et les rediscuter une par une.
 
 **Format de chaque choix**
@@ -26,9 +26,10 @@ Un glossaire des termes techniques est à la fin.
 6. [Communication carte ↔ PC](#6-communication-carte--pc) : C18 à C24
 7. [Application PC](#7-application-pc) : C25 à C31
 8. [Outils et méthode de travail](#8-outils-et-méthode-de-travail) : C32 à C34
-9. [Décisions encore ouvertes](#9-décisions-encore-ouvertes)
-10. [Chiffres clés](#10-chiffres-clés)
-11. [Glossaire](#11-glossaire)
+9. [Wi-Fi et mise à jour du firmware](#9-wi-fi-et-mise-à-jour-du-firmware) : C35 à C44
+10. [Décisions encore ouvertes](#10-décisions-encore-ouvertes)
+11. [Chiffres clés](#11-chiffres-clés)
+12. [Glossaire](#12-glossaire)
 
 ---
 
@@ -45,23 +46,29 @@ Un glossaire des termes techniques est à la fin.
 - **Récupération des données** : avant tout en sortant la carte SD. L'appli doit quand même
   lister, afficher et modifier les enregistrements.
 - **Évolutions prévues** : horloge interne (RTC), LED d'état de la respiration, boutons sur
-  l'appareil, peut-être Wi-Fi.
+  l'appareil. Le Wi-Fi est fait (section 9).
 
 ## 2. Vue d'ensemble
 
 ```
  Capteurs ──I2C──> ESP32-S3 (XIAO) ──SPI──> carte SD  (fichiers CSV + meta.json)
                         │
-                        └──USB──> PC Windows : Chrome / Edge
-                                  page web locale (Web Serial)
-                                  - direct : 4 courbes
-                                  - enregistrements : liste, lecture, export CSV
+                        ├──USB──> PC Windows : Chrome / Edge
+                        │         page web locale (Web Serial)
+                        │         - direct : 4 courbes
+                        │         - enregistrements : liste, lecture, export CSV
+                        │         - mise à jour du firmware
+                        │
+                        └──Wi-Fi (réseau BreathLogger-XXXX créé par l'appareil)──>
+                                  PC, tablette, téléphone : la même page, servie par
+                                  l'appareil (http://192.168.4.1), jusqu'à 4 écrans
 
  Dans l'ESP32 :
  cœur 1  tâche acquisition : toutes les 20 ms, lit les capteurs et horodate
               ├──> file "enregistrement" (10 s) ──> écriture SD
               └──> file "direct" ──> USB vers la page
  cœur 0  tâche E/S : écriture SD (vidée chaque seconde), commandes USB, état toutes les 0,5 s
+         tâche Wi-Fi : page web, WebSocket ; échange avec la tâche E/S par des files
 ```
 
 ---
@@ -227,11 +234,16 @@ Un glossaire des termes techniques est à la fin.
   - valeurs aberrantes (non finies, ou au-delà de ±100 000) : cellule vide plutôt que
     fausse ;
   - une voie sans valeur valide pendant 1 s est signalée « Pas de signal » ;
-  - si l'écriture SD échoue, l'enregistrement s'arrête proprement et la page affiche
-    l'erreur.
+  - si la carte SD refuse une écriture, elle est retentée deux fois, puis la carte est
+    remontée et le fichier rouvert (événement `sd_error`). La file de 10 s (C9) absorbe
+    l'attente. Seulement si ça échoue aussi, l'enregistrement s'arrête proprement
+    (événement `sd_failed`) et la page affiche l'erreur.
 - **Pourquoi** : une séance avec un athlète ne se refait pas facilement. Mieux vaut un fichier
-  incomplet mais valide qu'un fichier corrompu.
-- **Statut** : 📝 tests de coupure de courant et de retrait de la carte SD à faire.
+  incomplet mais valide qu'un fichier corrompu. La reprise après une écriture refusée vient
+  d'un test de 1 h où l'enregistrement s'était arrêté seul au bout de 15 min (cause restée
+  inconnue, pas revue depuis).
+- **Statut** : 📝 tests de coupure de courant et de retrait de la carte SD à faire. La reprise
+  après une écriture refusée n'a pas encore servi sur la carte.
 
 ### C12 · On n'efface jamais rien directement
 
@@ -315,15 +327,16 @@ Un glossaire des termes techniques est à la fin.
 
 ### C18 · Câble USB d'abord
 
-- **Décision** : liaison par câble USB. Le Wi-Fi est peut-être pour plus tard.
+- **Décision** : liaison par câble USB d'abord. Le Wi-Fi a été ajouté ensuite, en plus (C35).
 - **Pourquoi** :
   - fiable, rien à configurer, et l'appareil est alimenté par le câble ;
   - suffisant sur tapis de course.
 - **Écarté pour l'instant** :
-  - le Wi-Fi (le PC perdrait internet en se connectant au réseau de l'appareil) ;
+  - le Wi-Fi seul (le PC perd internet en se connectant au réseau de l'appareil). Il est
+    finalement venu en plus de l'USB, pas à sa place (C35) ;
   - le Bluetooth (choix des analyseurs portables du marché, comme VO2 Master ou PNOE, mais
     plus de travail).
-- **Statut** : ✅. ⏳ Sans fil à reconsidérer pour le terrain.
+- **Statut** : ✅.
 
 ### C19 · L'USB intégré de l'ESP32-S3 (« USB Serial/JTAG »)
 
@@ -504,7 +517,7 @@ Un glossaire des termes techniques est à la fin.
   - appareils qui servent leur propre page web (BeagleBone) ;
   - appareils vus comme une clé USB (enregistreurs Elitech) ;
   - applis web en USB (micro:bit).
-- **Statut** : ⏳ prochaines étapes dans la section 9.
+- **Statut** : ⏳ prochaines étapes dans la section 10.
 
 ### C31 · Le parcours client (constat)
 
@@ -513,10 +526,11 @@ Un glossaire des termes techniques est à la fin.
   2. passer outre l'alerte Windows sur le `.bat` ;
   3. deviner que le port « USB JTAG/serial debug unit » est l'appareil ;
   4. reformater sa carte SD si elle fait 64 Go ou plus ;
-  5. utiliser `flash.bat` pour les mises à jour du firmware.
+  5. utiliser `flash.bat` pour les mises à jour du firmware. Ce n'est plus vrai depuis C42 : la
+     mise à jour se fait depuis la page.
 - **Cible proposée** : 3 gestes : installer l'appli (QR code sur l'appareil), brancher, cliquer
   sur Connecter une seule fois.
-- **Statut** : ⏳ voir section 9.
+- **Statut** : ⏳ voir section 10.
 
 ---
 
@@ -527,7 +541,8 @@ Un glossaire des termes techniques est à la fin.
 - **Décision** :
   - le code est écrit et compilé dans WSL (Linux sous Windows) ;
   - comme WSL ne voit pas l'USB, la carte est flashée depuis Windows avec `flash.bat`
-    (`esptool.exe`) ;
+    (`esptool.exe`). Depuis la version 0.2.0, on peut aussi la mettre à jour depuis la page
+    (C42) ;
   - les fichiers sont recopiés dans `C:\Users\vince\BreathLogger` ;
   - un Python portable y est inclus pour les outils de test.
 - **Conséquences** : penser à recopier après chaque modification. `flash.bat` n'est pas encore
@@ -539,7 +554,10 @@ Un glossaire des termes techniques est à la fin.
 | Outil | Rôle |
 |---|---|
 | `tools/devtest.py` | Test complet sans navigateur : débit en direct, enregistrement avec pause, relecture du fichier avec contrôle CRC, aucune ligne manquante. |
-| `tools/jitter.py` | Heure d'arrivée de chaque paquet sur le PC, trous, retards, compteurs de la carte. Résultats bruts en CSV. |
+| `tools/jitter.py` | Heure d'arrivée de chaque paquet sur le PC, trous, retards, compteurs de la carte. Résultats bruts en CSV. Par USB ou par Wi-Fi (`--wifi`). |
+| `tools/wifitest.py` | Test Wi-Fi automatique d'1 minute : plusieurs écrans, règle « un seul écran commande », écran qui disparaît. |
+| `tools/soaktest.py` | Test Wi-Fi de plusieurs heures : classe chaque coupure (appareil redémarré et pourquoi, PC parti du réseau…), avec en option un enregistrement vérifié à la fin. |
+| `tools/otatest.py` | Mise à jour du firmware sans navigateur : fichier refusé, morceau abîmé renvoyé, installation, et avec `--crash` le retour automatique à l'ancienne version. |
 | `index.html?debug` | Le même diagnostic vu depuis Chrome, plus les images lentes de la page. |
 | `tools/pinprobe` | Firmware de test : lit l'état de chaque broche sans rien piloter. |
 | `tools/sdprobe` | Firmware de test : cherche sur quelle broche répond la carte SD. |
@@ -557,9 +575,173 @@ Un glossaire des termes techniques est à la fin.
   n'aurait rien réglé. La mesure a montré que la cause était ailleurs.
 - **Statut** : ✅.
 
+## 9. Wi-Fi et mise à jour du firmware
+
+Fait du 18 au 20 octobre 2026 sur une branche à part (`wifi-prototype`), puis ramené dans la
+version principale une fois validé sur la carte.
+
+### C35 · Le Wi-Fi en plus de l'USB, sur un réseau créé par l'appareil
+
+- **Décision** :
+  - l'appareil crée son propre réseau Wi-Fi, `BreathLogger-XXXX` (les 4 derniers caractères
+    viennent de l'adresse de la puce, donc chaque appareil a un nom différent) ;
+  - le PC, une tablette ou un téléphone s'y connecte et ouvre la page à `http://192.168.4.1` ;
+  - l'USB reste là et marche en même temps. Le Wi-Fi est un moyen de liaison de plus, pas un
+    remplacement.
+- **Pourquoi** :
+  - plus de câble entre l'athlète et le PC ;
+  - marche partout, sans box ni internet, et sans rien régler selon le lieu.
+- **Écarté** :
+  - se connecter au Wi-Fi du lieu (salle, club) : il faudrait saisir le réseau et le mot de
+    passe à chaque endroit, et il n'y en a pas toujours sur le terrain ;
+  - le Bluetooth : débit plus faible, plus de travail, et pas de page servie par l'appareil.
+- **Conséquences** :
+  - pendant qu'il est sur le réseau de l'appareil, le PC n'a plus internet (sauf s'il est
+    aussi relié par câble Ethernet) ;
+  - mot de passe pour l'instant commun à tous les appareils (`breathlogger`) : voir O14 ;
+  - 4 écrans au plus en même temps.
+- **Statut** : ✅ validé sur la carte.
+
+### C36 · La page est rangée dans le firmware
+
+- **Décision** : à chaque compilation, le dossier `webapp` est compressé et ajouté au firmware
+  (`embed_webapp.py`). En Wi-Fi, c'est l'appareil qui sert la page. Il fait aussi « portail
+  captif » : en rejoignant le réseau, Windows, les téléphones et les tablettes ouvrent la page
+  tout seuls.
+- **Pourquoi** :
+  - rien à installer sur le PC : n'importe quel navigateur suffit (en Wi-Fi, pas besoin de
+    Web Serial) ;
+  - la page et le firmware sont toujours de la même version.
+- **Écarté** : ranger la page dans un espace de fichiers séparé de la mémoire (LittleFS). Il
+  faudrait le flasher à part, avec le risque d'une page qui ne correspond pas au firmware.
+- **Conséquences** : changer la page demande de recompiler et réinstaller le firmware. Depuis
+  C42, ça se fait depuis la page elle-même.
+- **Statut** : ✅ portail captif confirmé sur la carte. 📝 téléphones et tablettes pas encore
+  essayés.
+
+### C37 · Les mêmes messages qu'en USB, par une WebSocket
+
+- **Décision** : en Wi-Fi, les messages JSON sont exactement ceux de l'USB (C20), un par
+  message WebSocket, sur le port 81. Une réponse va seulement à l'écran qui a envoyé la
+  commande ; les données, l'état et les événements vont à tous.
+- **Pourquoi** : un seul protocole, donc la page et les outils de test servent pour les deux
+  liaisons.
+- **Statut** : ✅.
+
+### C38 · Le Wi-Fi ne fait jamais attendre l'enregistrement
+
+- **Décision** :
+  - tout le Wi-Fi tourne dans sa propre tâche. La tâche E/S lui passe les messages par des
+    files et ne l'attend jamais ;
+  - les réponses ne sont jamais sautées. Les données en direct, elles, sont sautées pour un
+    écran qui ne suit pas ;
+  - un écran qui ne lit plus rien pendant 3 s, ou qui a quitté le réseau, est abandonné.
+- **Pourquoi** : mesuré sur la carte, un écran disparu sans prévenir (Wi-Fi coupé, PC en
+  veille) bloquait l'envoi jusqu'à ~10 s par message. Pendant un enregistrement, la file de
+  10 s (C9) aurait pu déborder.
+- **Conséquences** : la bibliothèque WebSocket est copiée dans le projet
+  (`firmware/lib/WebSockets`) et corrigée. Un défaut d'Arduino 2.0.17 (une erreur laissée par
+  une connexion fermée) lui faisait fermer les autres écrans quand l'un partait. Le détail
+  est dans `PATCHED.md`.
+- **Statut** : ✅ `wifitest.py` réussi ; test de 1 h avec enregistrement : 0 coupure, 179 992
+  lignes, aucune perte.
+
+### C39 · Un seul écran commande, les autres regardent
+
+- **Décision** : en Wi-Fi, un seul écran peut changer quelque chose (démarrer, arrêter,
+  renommer, supprimer, mettre à jour le firmware…). Les autres peuvent regarder, lister et
+  lire, avec un bouton « Prendre la main ». Le premier écran connecté a la main ; quand il
+  part, c'est celui connecté depuis le plus longtemps. L'USB peut toujours tout faire.
+- **Pourquoi** : deux personnes qui commandent le même appareil en même temps (l'une arrête
+  ce que l'autre vient de lancer) seraient une source d'erreurs pendant une séance.
+- **Écarté** : tous les écrans égaux. C'est plus simple, mais les ordres se croiseraient.
+- **Statut** : ✅.
+
+### C40 · Marge d'affichage de 0,5 s en Wi-Fi
+
+- **Décision** : en Wi-Fi, la page affiche avec 0,5 s de retard au lieu de 0,2 s (C26).
+- **Pourquoi** : mesuré avec `jitter.py --wifi` sur 300 s : l'appareil envoie toujours à
+  l'heure, mais le Wi-Fi livre parfois en retard : médiane 12 ms, 99 % sous 164 ms,
+  maximum ~450 ms (côté radio et PC, par exemple quand le PC cherche d'autres réseaux).
+- **Conséquences** : le défilement reste fluide. L'enregistrement n'est pas concerné : il est
+  fait par l'appareil.
+- **Statut** : ✅.
+
+### C41 · Canal Wi-Fi choisi automatiquement
+
+- **Décision** :
+  - à la mise sous tension, l'appareil écoute les réseaux autour pendant ~2 s et prend le
+    moins encombré des canaux 1, 6 et 11, les trois qui ne se chevauchent pas. Un réseau
+    compte plus s'il est fort et sur le même canal, moins s'il est jusqu'à 4 canaux plus
+    loin ;
+  - après un redémarrage sans coupure de courant (mise à jour, plantage), il garde le canal
+    d'avant sans réécouter : son réseau revient ~2 s plus tôt ;
+  - la page montre le canal, et au survol ce que l'appareil a entendu.
+- **Pourquoi** : le lieu change d'une séance à l'autre, un canal fixe peut tomber sur celui de
+  la box d'à côté. Garder le canal au redémarrage : sur le PC de test, Windows revient alors
+  tout seul sur le réseau de l'appareil.
+- **Écarté** :
+  - un canal fixe. Reste possible avec `WIFI_CHANNEL` dans `config.h` ;
+  - changer de canal en cours de route : ça couperait tous les écrans.
+- **Conséquences** : pour choisir à nouveau, débrancher ou éteindre l'appareil.
+- **Statut** : ✅.
+
+### C42 · Mise à jour du firmware depuis la page
+
+- **Décision** :
+  - dans le panneau Appareil, « Mettre à jour le firmware » : on choisit le fichier `.bin`,
+    par USB ou par Wi-Fi ;
+  - la page lit d'abord le fichier : un fichier qui n'est pas un firmware Breath Logger est
+    refusé, et la page affiche la version et la date de celui qu'on va installer ;
+  - le fichier part par morceaux de 2 Ko, chacun avec son CRC-32 (comme C23). Un morceau
+    abîmé ou perdu est renvoyé ;
+  - le nouveau firmware s'écrit dans **l'autre moitié** de la mémoire (deux emplacements de
+    3,3 Mo). Celui qui tourne n'est pas touché tant que le fichier entier n'est pas arrivé et
+    vérifié (marque Breath Logger, empreinte SHA-256 de toute l'image) ;
+  - refusé pendant un enregistrement, et réservé à l'écran qui a la main (C39) ;
+  - après le redémarrage, la page se reconnecte et affiche le résultat. En Wi-Fi, elle se
+    recharge, puisque la nouvelle version apporte aussi sa page.
+- **Pourquoi** : c'était la décision ouverte O6. `flash.bat` est un outil de développeur
+  (Windows seulement, port COM à connaître, alerte de sécurité).
+- **Écarté** : flasher depuis la page comme le fait `flash.bat` (esptool-js). Ça marche
+  seulement par USB et réécrit tout, sans retour possible si la nouvelle version est mauvaise.
+- **Conséquences** :
+  - ~15 s d'envoi en Wi-Fi (~70 Ko/s pour 960 Ko), puis ~10 s de redémarrage ;
+  - en Wi-Fi, si Windows ne revient pas seul sur le réseau de l'appareil, il faut l'y
+    reconnecter à la main. La page le dit, puis reprend d'elle-même ;
+  - la toute première version qui sait le faire (0.2.0) doit être installée avec
+    `flash.bat` ;
+  - `flash.bat` reste le secours si une version cassait à la fois l'USB et le Wi-Fi
+    (maintenir BOOT en branchant si besoin).
+- **Statut** : ✅ validé sur la carte, par la page et avec `otatest.py`.
+
+### C43 · Retour automatique à l'ancienne version
+
+- **Décision** : une nouvelle version n'est gardée qu'une fois qu'elle a fait ses preuves :
+  dès qu'un écran lui parle, ou après 60 s sans plantage. Si elle redémarre avant (plantage,
+  blocage), l'appareil revient tout seul à l'ancienne version, et la page le signale.
+- **Pourquoi** : une mise à jour ratée chez un client ne doit pas laisser un appareil
+  inutilisable.
+- **Conséquences** :
+  - une version qui tient 60 s mais casse à la fois l'USB et le Wi-Fi serait gardée. Seul
+    `flash.bat` la rattraperait ;
+  - un firmware de test fait exprès pour planter (`pio run -e crash-test`) vérifie ce retour.
+- **Statut** : ✅ testé sur la carte avec `crash-test.bin` : retour seul à la version
+  d'avant, signalé.
+
+### C44 · Chaque firmware dit exactement qui il est
+
+- **Décision** : à chaque compilation, `build_info.py` inscrit dans le firmware sa version
+  (`FW_VERSION`, aujourd'hui 0.2.0), la date et l'heure de compilation, et le numéro de commit
+  Git (avec un `+` si le code n'était pas encore commité). La page l'affiche ; la mise à jour
+  s'en sert pour savoir si le changement a vraiment eu lieu.
+- **Pourquoi** : deux compilations du même code ont maintenant chacune leur nom. Sans ça, on
+  ne pouvait pas savoir quelle version tournait sur un appareil.
+- **Statut** : ✅.
+
 ---
 
-## 9. Décisions encore ouvertes
+## 10. Décisions encore ouvertes
 
 | # | Sujet | Options | Proposition |
 |---|---|---|---|
@@ -568,18 +750,19 @@ Un glossaire des termes techniques est à la fin.
 | O3 | **Horloge RTC** | Sans (le PC donne l'heure), ou avec une puce | Nécessaire si l'appareil enregistre seul, sans PC. |
 | O4 | **Connexion automatique** | Garder « Connecter + choisir le port », ou se connecter seul à l'ouverture et après un débranchement | Se connecter seul, et ne montrer que l'appareil dans la liste des ports. Peu de travail, gros gain. |
 | O5 | **Distribution aux clients** | A. appli web hébergée et installable (sans alerte Windows, mises à jour automatiques) · B. installateur `.exe` · C. appareil vu comme une clé USB | A. Questions : peut-on mettre l'appli en ligne ? Sur quel domaine ? |
-| O6 | **Mise à jour du firmware chez le client** | `flash.bat` (outil de développeur), ou mise à jour depuis l'appli dans le navigateur | Depuis l'appli. |
+| O6 | ~~**Mise à jour du firmware chez le client**~~ | Réglé : depuis la page (C42, C43). | – |
 | O7 | **Cartes SD des clients** | Carte fournie déjà formatée, ou firmware qui lit l'exFAT | Fournir la carte. Vérifier la faisabilité de l'exFAT. |
 | O8 | **Sessions simulées sur la SD** | Rien, ou une mention « simulé » dans `meta.json` et une étiquette dans la liste | Ajouter la mention (petit changement, reflash nécessaire). |
-| O9 | **Sans fil** | Bluetooth depuis la même page web, Wi-Fi, ou rester en câble | À décider selon le terrain : un câble entre l'athlète et le PC est-il acceptable ? |
+| O9 | **Sans fil** | Le Wi-Fi est fait (C35 à C41). Reste à mesurer : portée avec une personne qui porte l'appareil, consommation. | Mesurer avant de décider d'une batterie (O2). |
 | O10 | **Nom USB « Breath Logger »** | Garder l'USB intégré, ou passer à la pile TinyUSB | Garder pour l'instant (on perdrait le flash facile). |
 | O11 | **Sécurité électrique** | PC sur secteur relié à un athlète | Isolateur USB, ou PC sur batterie pendant les tests. |
 | O12 | **Cadre réglementaire et données** | Usage sportif ou médical | Médical : règlement européen sur les dispositifs médicaux (MDR). Sportif : marquage CE et RGPD. Le fait que les données restent sur le PC est un atout. |
-| O13 | **Tests de robustesse** | Coupure de courant, retrait de la carte SD, plusieurs heures | À faire sur la carte. `devtest.py --seconds 3600` pour l'endurance. |
+| O13 | **Tests de robustesse** | Coupure de courant, retrait de la carte SD, plusieurs heures | 1 h en Wi-Fi avec enregistrement réussie (`soaktest.py`). Restent la coupure de courant et le retrait de la carte SD. |
+| O14 | **Mot de passe Wi-Fi** | Commun à tous les appareils (aujourd'hui), ou propre à chaque appareil (étiquette ou QR code sur le boîtier) | Propre à chaque appareil. D'accord sur le principe, reporté. |
 
 ---
 
-## 10. Chiffres clés
+## 11. Chiffres clés
 
 | Mesure | Valeur | Source |
 |---|---|---|
@@ -595,10 +778,15 @@ Un glossaire des termes techniques est à la fin.
 | Plus longue session possible (limite FAT32 de 4 Go) | ~600 heures | calcul |
 | Lecture d'un fichier par USB | ~65 Ko/s (1 min 40 s par heure enregistrée) | mesuré |
 | Tour de la boucle E/S | 5 ms au plus | `jitter.py` (diag) |
+| Retard d'arrivée des données en Wi-Fi | médiane 12 ms, 99 % sous 164 ms, max ~450 ms | `jitter.py --wifi`, 300 s |
+| Retard d'affichage voulu en Wi-Fi | 0,5 s | choix (C40) |
+| Test Wi-Fi de 1 h avec enregistrement | 0 coupure, 179 992 lignes, 0 perte | `soaktest.py` |
+| Envoi d'un firmware (960 Ko) en Wi-Fi | ~15 s (~70 Ko/s), plus ~10 s de redémarrage | `otatest.py` |
+| Écoute des réseaux pour choisir le canal | ~2 s, à la mise sous tension seulement | C41 |
 
 ---
 
-## 11. Glossaire
+## 12. Glossaire
 
 - **ESP32-S3** : le microcontrôleur, le « cerveau » de l'appareil. Il a deux cœurs, qui peuvent
   faire deux choses en même temps.
@@ -625,3 +813,15 @@ Un glossaire des termes techniques est à la fin.
   icône, sa fenêtre, et marche hors ligne.
 - **RTC** : une puce horloge avec une pile, qui garde l'heure même éteinte.
 - **Gigue (jitter)** : l'irrégularité des délais d'arrivée des données.
+- **Point d'accès** : un appareil qui crée un réseau Wi-Fi, comme une box. Ici, c'est
+  l'appareil lui-même.
+- **Portail captif** : la page qui s'ouvre toute seule quand on rejoint un réseau Wi-Fi, comme
+  dans un hôtel.
+- **WebSocket** : une connexion qui reste ouverte entre une page web et un serveur, dans les
+  deux sens. Elle remplace le port série quand on passe par le Wi-Fi.
+- **Canal Wi-Fi** : la « fréquence » utilisée par un réseau. En 2,4 GHz, seuls les canaux 1,
+  6 et 11 ne se chevauchent pas.
+- **Mise à jour OTA** (*over the air*) : installer un nouveau firmware sans outil de flashage,
+  par la liaison normale (ici USB ou Wi-Fi).
+- **Retour en arrière (rollback)** : revenir automatiquement à l'ancienne version si la
+  nouvelle ne démarre pas correctement.
