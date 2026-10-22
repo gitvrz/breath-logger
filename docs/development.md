@@ -68,6 +68,7 @@ All in `firmware/src/config.h`:
 | `FW_VERSION` | `"0.2.0"` | Shown by the page. Raise it for each version given out. |
 | `SAMPLE_RATE_HZ` | 50 | Measurements per second; must divide 1000. |
 | `USE_SIMULATED_SENSORS` | 0 | 0 = real sensors (`sensors_real.cpp`: LPS28DFW pressure, gives pressure and flow); 1 = simulated breathing, for a demo without the sensor board. |
+| `SIM_FLOW_PRESSURE_FACTOR` | −1 | Simulated sensors only: pressure and flow multiplied by this factor (−1 = upside down). |
 | `PIN_I2C_SDA`, `PIN_I2C_SCL`, `I2C_FREQ` | 5, 6, 100 kHz | Sensor board bus (the DS1307 does not go faster). |
 | `PRESSURE_BASELINE_S` | 60 | Pressure channel = pressure − its average over this time (the atmospheric pressure). |
 | `FLOW_COEF` | −1000 | Flow = coefficient × pressure (L/min per cmH₂O). Noted in each session. Not calibrated yet. From about −67 on, the flow curve is at least as tall as the pressure curve on the page (axes ±200 L/min and ±3 cmH₂O). |
