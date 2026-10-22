@@ -45,7 +45,7 @@ void sensorsRead(int64_t tUs, float out[NUM_CHANNELS]) {
 
   out[0] = co2 + noise(0.02);
   out[1] = o2 + noise(0.03);
-  out[2] = SIM_FLOW_PRESSURE_FACTOR * (flow + noise(1.0));
-  out[3] = SIM_FLOW_PRESSURE_FACTOR * (1e-4 * flow * fabs(flow) + noise(0.02));  // mouthpiece resistance
+  out[2] = flow + noise(1.0);
+  out[3] = SIM_PRESSURE_FACTOR * (1e-4 * flow * fabs(flow) + noise(0.02));  // mouthpiece resistance
 }
 #endif

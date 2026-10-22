@@ -124,7 +124,7 @@ Les valeurs ci-dessous sont celles du dépôt aujourd'hui.
 | Réglage | Valeur | Ce que ça fait |
 |---|---|---|
 | `USE_SIMULATED_SENSORS` | `1` | `1` : le boîtier fabrique une respiration réaliste, sans aucun capteur (démonstration, développement). `0` : il lit la carte capteurs. **À passer à `0` pour mesurer.** |
-| `SIM_FLOW_PRESSURE_FACTOR` | `-1.0f` | En mode simulé seulement : les courbes Pression et Débit sont multipliées par ce facteur (`-1` = inversées) |
+| `SIM_PRESSURE_FACTOR` | `-1.0f` | En mode simulé seulement : la courbe Pression est multipliée par ce facteur. `-1` : la pression est l'inverse du débit, comme avec le vrai capteur |
 | `PRESSURE_BASELINE_S` | `60` | La courbe Pression est l'écart à la pression atmosphérique, elle-même moyennée sur ce nombre de secondes |
 | `FLOW_COEF` | `-76.0f` | Débit (L/min) = ce coefficient × pression (cmH₂O). **Pas encore étalonné.** Négatif : on expire quand le débit est négatif |
 | `SAMPLE_RATE_HZ` | `50` | Mesures par seconde. Doit diviser 1000 |

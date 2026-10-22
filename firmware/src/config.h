@@ -11,9 +11,10 @@
 
 // 1 = fake breathing signals (no sensors needed), 0 = real sensors (sensors_real.cpp)
 #define USE_SIMULATED_SENSORS 1
-// Simulated sensors only: the pressure and flow curves are multiplied by this factor
-// (-1 = upside down). CO2 and O2 do not change.
-#define SIM_FLOW_PRESSURE_FACTOR -1.0f
+// Simulated sensors only: the pressure curve is multiplied by this factor. -1 = the
+// opposite of the flow, as with the real sensor (flow = negative FLOW_COEF x pressure).
+// The flow, CO2 and O2 curves do not change.
+#define SIM_PRESSURE_FACTOR -1.0f
 
 // --- Sensor board (I2C) ----------------------------------------------------------
 // LPS28DFW pressure sensor: gives the pressure channel, and the flow channel from it.
