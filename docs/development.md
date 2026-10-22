@@ -67,7 +67,15 @@ All in `firmware/src/config.h`:
 |---|---|---|
 | `FW_VERSION` | `"0.2.0"` | Shown by the page. Raise it for each version given out. |
 | `SAMPLE_RATE_HZ` | 50 | Measurements per second; must divide 1000. |
-| `USE_SIMULATED_SENSORS` | 1 | 1 = simulated breathing; 0 = real sensors (`sensors_real.cpp`). |
+| `USE_SIMULATED_SENSORS` | 0 | 0 = real sensors (`sensors_real.cpp`: LPS28DFW pressure, gives pressure and flow); 1 = simulated breathing, for a demo without the sensor board. |
+| `PIN_I2C_SDA`, `PIN_I2C_SCL`, `I2C_FREQ` | 5, 6, 100 kHz | Sensor board bus (the DS1307 does not go faster). |
+| `PRESSURE_BASELINE_S` | 60 | Pressure channel = pressure − its average over this time (the atmospheric pressure). |
+| `FLOW_COEF` | −1000 | Flow = coefficient × pressure (L/min per cmH₂O). Noted in each session. Not calibrated yet. From about −67 on, the flow curve is at least as tall as the pressure curve on the page (axes ±200 L/min and ±3 cmH₂O). |
+| `SIM_GAS`, `SIM_ETCO2`, `SIM_CO2_*`, `SIM_O2_*` | 1, 5 %… | CO₂ and O₂ simulated from the breath phase of the real pressure (formula in `config.h`). 0 = empty. |
+| `SIM_GAS_DP_THRESHOLD`, `SIM_GAS_PHASE_INTEGRAL` | 0.05 cmH₂O, 0.02 cmH₂O·s | Breath phase deaf to noise: dead band, then integrator. Raise them if noise still switches the phase. |
+| `BATTERY_SIMULATED`, `BATTERY_SIM_HOURS` | 1, 8 | 1 = made-up battery (none fitted yet), empty after 8 h; 0 = voltage read on `PIN_BATTERY`. |
+| `PIN_BATTERY`, `BATTERY_DIVIDER` | 4 (D3), 2.0 | Battery voltage pin and its divider (battery voltage / pin voltage): check on the board. |
+| `RTC_ENABLED` | 1 | DS1307 clock chip: the device knows the time at power-on, without a PC. |
 | `PIN_SD_*`, `SD_USE_SDMMC` | SPI on our board | SD card wiring. |
 | `WIFI_ENABLED` | 1 | 0 = USB only. |
 | `WIFI_PASSWORD` | `"breathlogger"` | The same for every device for now. |
@@ -82,7 +90,10 @@ All in `firmware/src/config.h`:
 |---|---|
 | `main.cpp` | Start-up and the IO task on core 0 (SD writes, commands, status). |
 | `acquisition.*` | Task on core 1: every 20 ms, reads the sensors, timestamps, feeds the queues. |
-| `sensors.h`, `sensors_sim.cpp`, `sensors_real.cpp` | Sensor interface: simulated now, real drivers to write. |
+| `sensors.h`, `sensors_sim.cpp`, `sensors_real.cpp` | Sensor interface: simulated signals, or the real sensors (pressure, flow from it). |
+| `clock.*` | Date and time: DS1307 clock chip, set from the PC when it connects. |
+| `i2c.h` | Register reads and writes on the I2C bus. |
+| `battery.*` | Battery level: made up for now, or the voltage on D3. |
 | `recorder.*` | Recording states (start, pause, continue, stop), CSV writing, `meta.json`. |
 | `storage.*` | SD card: mount, remount after an error, free space. |
 | `commands.*` | The commands of `docs/protocol.md`: one function per `cmd`. |

@@ -3,11 +3,13 @@
 #include <esp_system.h>
 #include "clock.h"
 #include "acquisition.h"
+#include "battery.h"
 #include "commands.h"
 #include "link.h"
 #include "net.h"
 #include "ota.h"
 #include "recorder.h"
+#include "sensors.h"
 #include "storage.h"
 
 static double round3(double v) { return round(v * 1000.0) / 1000.0; }
@@ -44,6 +46,13 @@ static void addStatus(JsonObject o) {
   sd["retries"] = recorderSdRetries();        // writes tried again since boot
   sd["recoveries"] = recorderSdRecoveries();  // card remounted during a recording since boot
   o["clock"] = clockSynced();
+  if (batteryKnown()) {
+    JsonObject b = o["battery"].to<JsonObject>();
+    b["pct"] = batteryPercent();
+    b["v"] = round(batteryVolts() * 100.0) / 100.0;
+  }
+  float atm = sensorsAtmHpa();
+  if (!isnan(atm)) o["p_atm_hpa"] = round(atm * 100.0) / 100.0;
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["uptime_s"] = millis() / 1000;
   o["wifi_clients"] = netClients();
@@ -84,6 +93,7 @@ static void addInfo(JsonObject o) {
   o["rolled_back"] = otaRolledBack(); // the last firmware update did not start: old one kept
   o["rate_hz"] = SAMPLE_RATE_HZ;
   o["simulated"] = (bool)USE_SIMULATED_SENSORS;
+  o["rtc"] = clockRtcFound();  // clock chip: the time is kept while the device is off
   o["reset_reason"] = (int)esp_reset_reason();
   o["wifi"] = netSsid();  // "" = Wi-Fi disabled
   o["wifi_channel"] = netChannel();  // 0 = not started yet
@@ -107,6 +117,7 @@ static void addInfo(JsonObject o) {
     c["id"] = ids[i];
     c["name"] = names[i];
     c["unit"] = units[i];
+    c["fitted"] = (bool)(sensorsFitted() & 1 << i);  // false: no sensor, always empty
   }
 }
 
@@ -420,7 +431,7 @@ void commandsHandle(const char *line) {
   else if (idleOnly && !idle) err = "busy: stop the recording first";
   else if (!strcmp(c, "hello")) {
     int64_t t = cmd["time"] | (int64_t)0;
-    if (t > 0) clockSet(t);
+    if (t > 0) clockSetFromPc(t);
     otaConfirm();  // a screen talks to this firmware: after an update, keep it
     addInfo(reply["info"].to<JsonObject>());
     addStatus(reply["status"].to<JsonObject>());

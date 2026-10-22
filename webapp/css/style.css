@@ -210,6 +210,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .device-badge.on::after { background: var(--good); }
 .device-title { font-weight: 600; font-size: 13px; }
 .device-sub { font-size: 12px; color: var(--muted); }
+.device-id { flex: 1; min-width: 0; }
+.device-title-row { display: flex; align-items: flex-start; gap: 10px; }
+.batt { margin-left: auto; margin-top: 1px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.batt.low { color: var(--rec); font-weight: 600; }
 .device-rows { display: flex; flex-direction: column; gap: 9px; font-size: 12.5px; }
 .drow { display: flex; justify-content: space-between; gap: 8px; }
 .drow > span:first-child { color: var(--muted); white-space: nowrap; }
@@ -320,10 +324,12 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .mrow.fault .mvalue .big { color: var(--muted); }
 .mrow .fault-tag { display: none; }
 .mrow.fault .fault-tag { display: inline-flex; }
+.mrow.absent .mvalue .big { color: var(--muted); }
+.mrow .absent-tag { display: none; }
+.mrow.absent .absent-tag { display: inline-flex; }
 /* Simulated sensors: banner above the live view + tag on every signal */
 .notice.sim { background: var(--paused-soft); color: var(--paused); border: 1px solid var(--paused); }
-.mrow .sim-tag { display: none; }
-.monitor.simulated .mrow .sim-tag { display: inline-flex; }
+.mrow.absent .fault-tag { display: none; }
 /* Wi-Fi, another screen has control: what would change something is greyed out */
 #liveControl .btn { margin-left: auto; }
 body.readonly :is(#btnStart, #btnPause, #btnStop, #btnNewRec, #btnTrim, #btnViewContinue, #btnTrash,

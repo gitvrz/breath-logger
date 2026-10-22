@@ -6,6 +6,7 @@
 #include "clock.h"
 #include "link.h"
 #include "recorder.h"
+#include "sensors.h"
 #include "storage.h"
 #include "textbuf.h"
 
@@ -36,6 +37,14 @@ static JsonObject addEvent(const char *type, double t) {
   e["t_s"] = round3(t);
   e["type"] = type;
   return e;
+}
+
+// Start or continue: what the flow and pressure columns were computed with from here
+static void addRunEvent(const char *type, double t) {
+  JsonObject e = addEvent(type, t);
+  e["flow_coef"] = FLOW_COEF;
+  float atm = sensorsAtmHpa();
+  if (!isnan(atm)) e["p_atm_hpa"] = round(atm * 100.0) / 100.0;
 }
 
 static void updateSessionTotals() {
@@ -206,7 +215,7 @@ const char *recorderStart(const char *rec, int sid, const char *notes, int *outS
     runOffsetS = 0;
     samples = 0;
     lastTS = 0;
-    addEvent("start", 0);
+    addRunEvent("start", 0);
   } else {  // continue an existing session: append to its CSV
     JsonObject s = metaFindSession(meta, sid);
     if (s.isNull()) return "session not found";
@@ -220,7 +229,7 @@ const char *recorderStart(const char *rec, int sid, const char *notes, int *outS
     runOffsetS = max(sinceStart, end + 1.0 / SAMPLE_RATE_HZ);  // time never goes back
     samples = s["samples"] | 0;
     lastTS = end;
-    addEvent("continue", runOffsetS);
+    addRunEvent("continue", runOffsetS);
   }
 
   if (!metaSave(rec, meta)) {

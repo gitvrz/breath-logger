@@ -5,8 +5,11 @@
 //
 // Protocol: docs/protocol.md
 #include <Arduino.h>
+#include <Wire.h>
 #include <esp_timer.h>
 #include "acquisition.h"
+#include "battery.h"
+#include "clock.h"
 #include "commands.h"
 #include "config.h"
 #include "link.h"
@@ -92,6 +95,8 @@ static void ioTask(void *) {
     }
     recorderPoll();
     otaPoll();
+    clockPoll();
+    batteryPoll();
     sendLive();
     watchAcquisition();
 
@@ -109,6 +114,8 @@ void setup() {
   linkBegin();
   netBegin();
   storageMount();
+  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ);
+  clockBegin();  // before the acquisition task: after that, only that task reads the bus
   sensorsBegin();
   acqBegin();
   xTaskCreatePinnedToCore(ioTask, "io", 12288, nullptr, 5, nullptr, IO_CORE);

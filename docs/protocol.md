@@ -33,7 +33,7 @@ command with exactly one `reply` carrying the same `id`.
 
 | cmd | fields | allowed while recording | notes |
 |---|---|---|---|
-| `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock. Send right after connecting. Reply contains `info` + `status`. `info`: `fw` (version), `build` (date + git commit, differs at every build), `rolled_back`, `rate_hz`, `simulated`, `reset_reason`, `wifi` (network name), `wifi_channel`, `wifi_scan` (per candidate channel: `channel`, `networks` heard, crowding `score`), `channels`. |
+| `hello` | `time` (Unix ms, PC clock) | yes | Sets the device clock if it has no time yet or is more than 1 s off (it then also sets the clock chip, see below). Send right after connecting. Reply contains `info` + `status`. `info`: `fw` (version), `build` (date + git commit, differs at every build), `rolled_back`, `rate_hz`, `simulated`, `rtc` (clock chip found), `reset_reason`, `wifi` (network name), `wifi_channel`, `wifi_scan` (per candidate channel: `channel`, `networks` heard, crowding `score`), `channels` (`id`, `name`, `unit`, `fitted`: false = no sensor for it, always empty, not a fault. |
 | `status` | – | yes | Reply contains `status`. |
 | `take_control` | – | yes | Wi-Fi: this screen gets control (see above). |
 | `start` | `rec`, `session` (`"new"` or a session id), `notes`? | – (idle only) | Creates the recording folder if needed. `session` = id → continue that session (append). |
@@ -101,8 +101,14 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
 {"type":"status","state":"idle|recording|paused","rec":"subject01","session":2,
  "t_s":12.34,"samples":617,"run_samples":617,"dropped":0,"live_dropped":0,
  "acq_ok":true,"faults":[],
- "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"rate_hz":50,"uptime_s":321,"wifi_clients":1,"control":0}
+ "sd":{"ok":true,"total_mb":7580,"free_mb":7012},"clock":true,"battery":{"pct":87,"v":4.05},"p_atm_hpa":1013.42,
+ "rate_hz":50,"uptime_s":321,"wifi_clients":1,"control":0}
 ```
+- `clock`: the device knows the date and time (from its clock chip or from a PC).
+- `battery`: level in % (single-cell LiPo curve) and volts, measured every 5 s (absent
+  before the first measurement). Made up while `BATTERY_SIMULATED 1` (config.h).
+- `p_atm_hpa`: atmospheric pressure the pressure channel is relative to (absent while
+  unknown, and with simulated sensors).
 - `samples`: rows in the session file; `run_samples`: rows since the last `start` / `continue`.
 - `sd.retries` / `sd.recoveries`: SD writes tried again / card remounted during a recording,
   since the device started (should stay 0). `diag.sd_slowest_ms`: slowest SD write or flush.
@@ -110,7 +116,8 @@ One element of a long answer (`list`), with the `id` of the command. The `reply`
 - `dropped`: samples lost **for the SD recording** (should always be 0).
 - `live_dropped`: samples not sent to the PC (harmless, display only).
 - `acq_ok`: false when no sample was acquired for 1 s (e.g. a sensor driver stuck).
-- `faults`: channels (`co2`, `o2`, `flow`, `pressure`) without a valid value for 1 s.
+- `faults`: channels (`co2`, `o2`, `flow`, `pressure`) without a valid value for 1 s. Channels
+  without a sensor (`fitted: false`) are never listed.
 - Sensor values that are not finite or beyond ±100000 are stored as missing (empty CSV cell).
 - `diag` (only in the periodic status, timing diagnostics over the last 500 ms):
   `{"tx_max":420,"stall_max_ms":3,"loop_max_ms":6,"age_max_ms":4}`.
@@ -145,6 +152,15 @@ t_s,co2_pct,o2_pct,flow_lpm,pressure_cmh2o
 Continuing a session later keeps counting from the original start (so a gap of
 hours is normal).
 
+With the real sensors (`USE_SIMULATED_SENSORS 0`), from the LPS28DFW pressure sensor:
+- `pressure_cmh2o` = measured pressure − atmospheric pressure. The atmospheric pressure is
+  the average of the measured pressure over `PRESSURE_BASELINE_S` (60 s): the plain mean at
+  first, then a moving average. It follows the weather, not the breaths.
+- `flow_lpm` = `FLOW_COEF` (config.h) × `pressure_cmh2o`. The value used is the `flow_coef`
+  of the `start` / `continue` event.
+- `co2_pct`, `o2_pct`: no gas sensor yet. With `SIM_GAS 1` (config.h), computed from the breath
+  phase given by the pressure (formula in config.h); with `SIM_GAS 0`, always empty.
+
 ### meta.json
 ```json
 {
@@ -169,6 +185,9 @@ hours is normal).
 - `end_s` = `t_s` of the last row (pauses and continuation gaps included).
 
 - `dropped` = samples lost because the SD card was too slow (should be 0).
+
+`start` and `continue` events also carry `flow_coef` and `p_atm_hpa`: what the flow and
+pressure columns were computed with from there (flow = `flow_coef` × pressure).
 
 Event types: `start`, `pause`, `resume`, `stop`, `continue`,
 `lost` (with `n`: samples lost there), `stall` (acquisition stopped delivering samples),

@@ -15,5 +15,5 @@ uint32_t acqRecordDropped();            // samples lost for the SD (must stay 0)
 uint32_t acqLiveDropped();
 void acqResetCounters();
 int64_t acqTakeFirstDropUs();           // time of the first lost sample since last call (0 = none)
-uint8_t acqFaults();                    // bit i set = channel i without valid value for 1 s
+uint8_t acqFaults();                    // bit i set = channel i (with a sensor) without valid value for 1 s
 bool acqCheckStalled(uint32_t nowMs);   // called by the IO task: true if no sample for ACQ_STALL_MS

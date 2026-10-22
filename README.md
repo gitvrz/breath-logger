@@ -84,10 +84,12 @@ button. Over USB you always have control.
   session or **continue** an existing one, then **Start**. **Pause** and **Stop** as needed.
 - The device does the recording itself. Unplugging the cable or closing the page does not
   stop it. Reconnecting shows the recording in progress.
-- The page sends the PC's time when it connects (the device has no clock yet), so connect
-  before recording to get real dates.
-- A yellow banner and a *Simulated* tag mean the values are not real measurements. The
-  firmware simulates the sensors until the real ones are chosen.
+- The device keeps the time on its clock chip (DS1307); the page corrects it from the PC's
+  time when it connects.
+- CO₂ and O₂ are simulated from the measured breathing until the gas sensors are fitted
+  (`SIM_GAS` in `config.h`). The page does not label them.
+- The battery level is the small battery icon at the top of the device panel; it turns red
+  and the page warns at 15 % and below.
 - On a power cut, at most about 1 s of data is lost. The session then shows as *interrupted*.
 
 ### 6. Recordings
@@ -175,8 +177,10 @@ wired in SPI mode:
 | MISO | D9 | 8 |
 | MOSI | D10 | 9 |
 
-GPIO 5 / 6 (D4 / D5) carry an I2C bus with external pull-ups, for the sensors. The pins
-are set in `firmware/src/config.h`.
+GPIO 5 / 6 (D4 / D5) carry an I2C bus with external pull-ups, for the sensor board:
+LPS28DFW pressure sensor, DS1307 clock chip (needs 5 V and its battery), LSM6DSM
+accelerometer + gyroscope (not used yet). The pins are set in `firmware/src/config.h`.
+`experiments/sensortest/` is a small separate program that prints all three chips' values.
 
 ## How it works
 
@@ -203,6 +207,6 @@ core 0  IO task: SD writes (flushed every 1 s), USB commands, status every 0.5 s
 | Page: live view, recordings, viewer, trim, export | works on the board; every function tried in demo mode |
 | Wi-Fi: own network, several screens, automatic channel | works on the board (1 h test: no cut, nothing lost) |
 | Firmware update from the page, automatic return | works on the board (`otatest.py`) |
-| Real sensors | waiting for the sensor choice (`firmware/src/sensors_real.cpp`) |
+| Real sensors | pressure (LPS28DFW) gives the pressure and flow curves; clock chip (DS1307) keeps the time without a PC. Written, not yet tried on the board. CO₂ and O₂: no sensor yet |
 | Robustness | still to test: power cut during a recording, SD card pulled out |
-| Later | clock chip (RTC), breathing LED, buttons, Wi-Fi password per device, battery |
+| Later | CO₂ and O₂ sensors, breathing LED, buttons, Wi-Fi password per device, battery |

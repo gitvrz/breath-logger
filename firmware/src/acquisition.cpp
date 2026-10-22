@@ -26,8 +26,9 @@ static void acqTask(void *) {
     s.t_us = esp_timer_get_time();
     sensorsRead(s.t_us, s.v);
 
-    // Garbage values would corrupt the files: treat them as missing
-    uint8_t f = 0;
+    // Garbage values would corrupt the files: treat them as missing.
+    // A channel without a sensor fitted is always empty: that is not a fault.
+    uint8_t f = 0, fitted = sensorsFitted();
     for (int c = 0; c < NUM_CHANNELS; c++) {
       if (!isfinite(s.v[c]) || fabsf(s.v[c]) > VALUE_LIMIT) s.v[c] = NAN;
       if (isnan(s.v[c])) {
@@ -35,7 +36,7 @@ static void acqTask(void *) {
       } else {
         nanStreak[c] = 0;
       }
-      if (nanStreak[c] >= FAULT_SAMPLES) f |= 1 << c;
+      if (nanStreak[c] >= FAULT_SAMPLES && (fitted & 1 << c)) f |= 1 << c;
     }
     faults = f;
     ticks++;

@@ -127,7 +127,9 @@ class MockTransport {
     const s = {
       state: this.state, dropped: 0, live_dropped: 0, acq_ok: true, faults: [],
       sd: { ok: true, total_mb: 7580, free_mb: 7012 },
-      clock: this.clockOffset != null, rate_hz: RATE, uptime_s: Math.floor(this.uptimeMs() / 1000),
+      clock: this.clockOffset != null,
+      battery: { pct: Math.max(0, Math.round(100 - this.uptimeMs() / 288000)), v: 4.1 }, // empty after 8 h
+      rate_hz: RATE, uptime_s: Math.floor(this.uptimeMs() / 1000),
     };
     if (this.state !== 'idle') {
       Object.assign(s, {

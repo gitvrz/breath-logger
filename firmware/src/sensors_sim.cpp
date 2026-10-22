@@ -18,6 +18,8 @@ static float noise(float amp) {
 }
 
 bool sensorsBegin() { return true; }
+uint8_t sensorsFitted() { return (1 << NUM_CHANNELS) - 1; }
+float sensorsAtmHpa() { return NAN; }
 
 void sensorsRead(int64_t tUs, float out[NUM_CHANNELS]) {
   double t = tUs / 1e6;

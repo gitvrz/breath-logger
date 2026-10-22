@@ -8,6 +8,9 @@ const LIVE_DELAY_S = 0.2;
 // the computer scans for networks): a bigger margin keeps the scrolling smooth.
 const LIVE_DELAY_WIFI_S = 0.5;
 
+// Battery level (%) at and below which the page warns
+const BATTERY_LOW = 15;
+
 class App {
   constructor() {
     this.device = null;
@@ -269,12 +272,15 @@ class App {
       return;
     }
     const sub = this.info
-      ? t('device.fw', { fw: this.info.fw, rate: this.info.rate_hz }) + (this.info.simulated && this.mode !== 'demo' ? ` · ${t('device.simulated')}` : '')
+      ? t('device.fw', { fw: this.info.fw, rate: this.info.rate_hz })
       : '';
     el.innerHTML = `
       <div class="device-head">
         <div class="device-badge on">${icon(this.mode === 'demo' ? 'flask' : 'plug', 17)}</div>
-        <div><div class="device-title">${escapeHtml(t(this.mode === 'demo' ? 'device.connectedDemo' : this.mode === 'wifi' ? 'device.connectedWifi' : 'device.connectedUsb'))}</div><div class="device-sub">${escapeHtml(sub)}</div></div>
+        <div class="device-id">
+          <div class="device-title-row"><span class="device-title">${escapeHtml(t(this.mode === 'demo' ? 'device.connectedDemo' : this.mode === 'wifi' ? 'device.connectedWifi' : 'device.connectedUsb'))}</span><span class="batt" id="devBattery" hidden></span></div>
+          <div class="device-sub">${escapeHtml(sub)}</div>
+        </div>
       </div>
       <div class="device-rows" id="deviceRows"></div>
       <div class="device-actions">
@@ -294,10 +300,12 @@ class App {
       <div class="drow ${sd.ok ? '' : 'bad'}" title="${escapeHtml(sd.ok ? t('device.sdFree', { free: fmtSize(sd.free_mb), total: fmtSize(sd.total_mb) }) : '')}"><span>${escapeHtml(t('device.sd'))}</span><span>${escapeHtml(sd.ok ? t('device.sdFreeShort', { free: fmtSize(sd.free_mb) }) : t('device.sdMissing'))}</span></div>
       ${sd.ok ? `<div class="gauge"><div style="width:${usedPct}%"></div></div>` : ''}
       <div class="drow ${st.clock ? '' : 'bad'}"><span>${escapeHtml(t('device.clock'))}</span><span>${escapeHtml(t(st.clock ? 'device.clockOk' : 'device.clockNo'))}</span></div>
+      ${st.p_atm_hpa != null ? `<div class="drow" title="${escapeHtml(t('device.atmHelp'))}"><span>${escapeHtml(t('device.atm'))}</span><span>${escapeHtml(fmtValue(st.p_atm_hpa, 1))} hPa</span></div>` : ''}
       <div class="drow ${st.acq_ok === false ? 'bad' : ''}"><span>${escapeHtml(t('device.acq'))}</span><span>${escapeHtml(t(st.acq_ok === false ? 'device.acqStalled' : 'device.acqOk'))}</span></div>
       <div class="drow ${st.dropped ? 'bad' : ''}"><span>${escapeHtml(t('device.lost'))}</span><span>${fmtNumber(st.dropped)}</span></div>
       ${this.info?.wifi_channel ? `<div class="drow" title="${escapeHtml(this.wifiHelp())}"><span>Wi-Fi</span><span>${escapeHtml(t('wifi.channel', { ch: this.info.wifi_channel }))}</span></div>` : ''}
       ${this.mode === 'wifi' ? `<div class="drow"><span>${escapeHtml(t('control.label'))}</span><span>${this.hasControl ? escapeHtml(t('control.me')) : `<button class="btn ghost sm" data-action="take-control">${escapeHtml(t('control.take'))}</button>`}</span></div>` : ''}`;
+    this.updateBattery();
     // Firmware update: only from the screen with control, and not while recording
     const fwBtn = $('#btnFirmware');
     if (fwBtn) {
@@ -305,6 +313,20 @@ class App {
       fwBtn.disabled = !!why;
       fwBtn.title = why;
     }
+  }
+
+  // Battery: small phone-style icon in the device panel's header, red when low
+  updateBattery() {
+    const el = $('#devBattery');
+    const b = this.status?.battery;
+    if (!el) return;
+    el.hidden = !b;
+    if (!b) return;
+    const low = b.pct <= BATTERY_LOW;
+    const html = `<svg viewBox="0 0 24 12" width="22" height="11" aria-hidden="true"><rect x="0.75" y="0.75" width="20" height="10.5" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><rect x="21.6" y="4" width="1.9" height="4" rx="0.9" fill="currentColor" opacity=".55"/><rect x="2.5" y="2.5" width="${(16.5 * Math.min(100, Math.max(0, b.pct))) / 100}" height="7" rx="1.3" fill="currentColor"/></svg><span>${b.pct} %</span>`;
+    if (el.dataset.html !== html) el.innerHTML = el.dataset.html = html;
+    el.classList.toggle('low', low);
+    el.title = t('device.batteryHelp', { pct: b.pct, v: fmtValue(b.v, 2) });
   }
 
   wifiHelp() {
@@ -344,6 +366,7 @@ class App {
       if (this.mode === 'wifi' && Date.now() - this.lastMsgMs >= 5000) this.device.close();
       if (st.acq_ok === false) msg = t('alert.stalled', { s: Math.max(1, silent) });
       else if (silent >= 2) msg = t('alert.noData', { s: silent });
+      else if (st.battery && st.battery.pct <= BATTERY_LOW) msg = t('alert.battery', { pct: st.battery.pct });
       else if (st.faults?.length) msg = t('alert.faults', { list: st.faults.map((id) => channelName(CHANNELS.find((c) => c.id === id) || { id, name: id })).join(', ') });
     }
     el.hidden = !msg;
@@ -359,12 +382,11 @@ class App {
     $('#transport').hidden = !connected || !this.status;
     $('#liveMonitor').hidden = !connected;
     $('#liveTools').hidden = !connected;
-    // Simulated values must never pass for real measurements
-    const sim = connected && (this.mode === 'demo' || !!this.info?.simulated);
+    // Demo mode: nothing is plugged in, say so
     const simEl = $('#liveSim');
-    simEl.hidden = !sim;
-    if (sim) simEl.innerHTML = `${icon('flask', 18)}<span>${escapeHtml(t(this.mode === 'demo' ? 'live.simDemo' : 'live.simFirmware'))}</span>`;
-    this.liveStack.setSimulated(sim);
+    simEl.hidden = !(connected && this.mode === 'demo');
+    if (!simEl.hidden) simEl.innerHTML = `${icon('flask', 18)}<span>${escapeHtml(t('live.simDemo'))}</span>`;
+    this.liveStack.setAbsent((this.info?.channels || []).filter((c) => c.fitted === false).map((c) => c.id));
     if (!connected || !this.status) {
       this.transportMode = null;
       return;

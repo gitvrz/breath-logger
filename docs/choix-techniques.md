@@ -1,6 +1,6 @@
 # Breath Logger : choix techniques
 
-État au 20 octobre 2026. Ce document rassemble toutes les décisions techniques du projet,
+État au 22 octobre 2026. Ce document rassemble toutes les décisions techniques du projet,
 pour pouvoir les présenter et les rediscuter une par une.
 
 **Format de chaque choix**
@@ -20,7 +20,7 @@ Un glossaire des termes techniques est à la fin.
 
 1. [Contexte et exigences](#1-contexte-et-exigences)
 2. [Vue d'ensemble](#2-vue-densemble)
-3. [Matériel](#3-matériel) : C1 à C5
+3. [Matériel](#3-matériel) : C1 à C5, C45 à C48
 4. [Firmware](#4-firmware) : C6 à C12
 5. [Stockage et format des fichiers](#5-stockage-et-format-des-fichiers) : C13 à C17
 6. [Communication carte ↔ PC](#6-communication-carte--pc) : C18 à C24
@@ -45,8 +45,8 @@ Un glossaire des termes techniques est à la fin.
 - **Sans internet** : tout doit marcher hors ligne.
 - **Récupération des données** : avant tout en sortant la carte SD. L'appli doit quand même
   lister, afficher et modifier les enregistrements.
-- **Évolutions prévues** : horloge interne (RTC), LED d'état de la respiration, boutons sur
-  l'appareil. Le Wi-Fi est fait (section 9).
+- **Évolutions prévues** : LED d'état de la respiration, boutons sur l'appareil. Le Wi-Fi
+  (section 9) et l'horloge interne (C4) sont faits.
 
 ## 2. Vue d'ensemble
 
@@ -122,35 +122,138 @@ Un glossaire des termes techniques est à la fin.
 - **Statut** : ✅ (SanDisk Ultra 64 Go reformatée). ⏳ Pour les clients : livrer la carte
   formatée, ou vérifier si le firmware peut lire l'exFAT.
 
-### C4 · Horloge : c'est le PC qui donne l'heure
+### C4 · Horloge : une puce DS1307, et le PC pour la mettre à l'heure
 
-- **Décision** : pas de puce horloge (RTC) pour l'instant. À la connexion, la page envoie
-  l'heure du PC à la carte.
-- **Pourquoi** : une pièce de moins. Tant qu'on enregistre avec le PC branché, les fichiers
-  ont la bonne date.
-- **Écarté** : une puce RTC dès maintenant. Elle reste prévue pour plus tard.
+- **Décision** : une puce horloge (RTC) DS1307 sur la carte capteurs, avec sa pile. Au
+  démarrage, le firmware la lit et connaît l'heure sans PC. Quand une page se connecte, elle
+  envoie l'heure du PC : si l'appareil n'a pas d'heure ou a plus d'1 s d'écart, il prend
+  celle du PC et la recopie dans la puce. Avant : seul le PC donnait l'heure.
+- **Pourquoi** : en cas de perte de connexion ou de redémarrage, l'appareil garde la bonne
+  heure et peut continuer une session, même sans page ouverte.
+- **Comment** :
+  - la puce ne compte que des secondes entières. Au démarrage, le firmware attend le
+    changement de seconde (1 s au plus) pour connaître l'heure à la milliseconde, puis le
+    compteur de l'ESP32 prend le relais ;
+  - l'heure du PC est recopiée dans la puce pile au changement de seconde ;
+  - les écarts de moins d'1 s sont ignorés : sinon l'heure bougerait un peu à chaque
+    connexion d'un écran ;
+  - l'heure est gardée en UTC, sans fuseau horaire.
+- **Écarté** : rester sans puce (pas de date sans PC, pas de « continuer » après un
+  redémarrage sans PC).
 - **Conséquences** :
-  - sans connexion préalable, une session n'a pas de vraie date (marquée `"clock": false`) ;
-  - on ne peut pas « continuer » une session si l'horloge n'est pas réglée.
-- **Statut** : ✅. ⏳ RTC à ajouter si l'appareil doit enregistrer seul.
+  - le DS1307 doit être alimenté en **5 V**. En 3,3 V il passe sur sa pile et ne répond plus
+    sur le bus. Il ne va qu'à 100 kHz, donc tout le bus I2C tourne à 100 kHz ;
+  - la précision est d'environ 1 min par mois, et la puce est remise à l'heure à chaque
+    connexion d'un PC ;
+  - sans puce (`RTC_ENABLED 0`) ou puce absente, on revient au fonctionnement d'avant.
+- **Statut** : 📝 compilé, pas encore testé sur la carte. ⏳ Vérifier l'alimentation 5 V.
 
-### C5 · Capteurs simulés en attendant les vrais
+### C5 · Capteurs : la pression est réelle, le CO₂ et l'O₂ pas encore
 
-- **Décision** : le firmware produit des signaux de respiration réalistes (athlète sur tapis)
-  tant que les capteurs ne sont pas choisis (`USE_SIMULATED_SENSORS 1`). Les vrais pilotes
-  iront dans `sensors_real.cpp`, sur le bus I2C (GPIO 5 et 6, résistances de rappel
-  externes).
-- **Pourquoi** : on peut développer et tester toute la chaîne (mesure, SD, USB, affichage)
-  sans attendre les capteurs.
+- **Décision** : `USE_SIMULATED_SENSORS 0`. Le capteur de pression LPS28DFW (I2C, GPIO 5
+  et 6) donne deux voies : la pression (C45) et le débit (C46). Pas encore de capteur de
+  CO₂ ni d'O₂ : ces voies sont simulées à partir de la respiration mesurée (C47).
+- **Pourquoi** : tester la chaîne avec une vraie mesure de pression dès que la carte
+  capteurs est là.
+- **Comment** :
+  - le capteur mesure 100 fois par seconde, avec une moyenne sur 16 mesures et un filtre
+    passe-bas à 25 Hz. Chaque lecture, toutes les 20 ms, a donc une valeur neuve et lissée ;
+  - s'il n'est pas trouvé au démarrage, le firmware le recherche toutes les 2 s ;
+  - avec `SIM_GAS 0`, les voies sans capteur sont annoncées à la page (`fitted: false`).
+    Elle les affiche « Pas de capteur », et elles ne déclenchent pas d'alerte.
 - **Conséquences** :
-  - les courbes affichées ne sont pas de vraies mesures. L'appli le signale par un bandeau
-    jaune et une étiquette « Simulé » sur chaque signal ;
-  - les enregistrements faits ainsi sont indiscernables des vrais sur la carte SD (voir
-    décisions ouvertes) ;
-  - les capteurs lents (par exemple un CO₂ à 10 Hz) devront être lus seulement quand ils ont
-    une nouvelle valeur, en répétant la dernière entre deux.
-- **Statut** : ✅ simulation. ⏳ Choix des capteurs (modèles, interfaces, unités, temps de
-  réponse).
+  - `USE_SIMULATED_SENSORS 1` remet la simulation complète, pour une démonstration sans
+    carte capteurs ;
+  - la carte capteurs a aussi un accéléromètre et un gyroscope (LSM6DSM), pas utilisés pour
+    l'instant. `experiments/sensortest/` les lit tous à part, pour un test rapide.
+- **Statut** : 📝 compilé, pas encore testé sur la carte. ⏳ Capteurs de CO₂ et d'O₂.
+
+### C45 · Pression = écart à la pression atmosphérique moyenne
+
+- **Décision** : la voie pression (cmH₂O) est la pression mesurée moins la pression
+  atmosphérique. Celle-ci est la moyenne de la pression mesurée sur une longue durée
+  (`PRESSURE_BASELINE_S`, 60 s) : la moyenne simple au début, puis une moyenne glissante.
+- **Pourquoi** : le capteur mesure une pression absolue (environ 1 013 hPa). Les variations
+  dues à la respiration ne sont que de quelques cmH₂O. La moyenne longue suit la météo et
+  l'altitude, mais pas les respirations.
+- **Conséquences** :
+  - la pression atmosphérique utilisée est affichée dans la page et notée au début de
+    chaque session (`p_atm_hpa`) ;
+  - pendant la première minute après la mise sous tension, la référence se forme encore.
+- **Statut** : 📝 compilé, pas encore testé sur la carte.
+
+### C46 · Débit = coefficient × pression, réglé dans `config.h`
+
+- **Décision** : débit (L/min) = coefficient × pression (cmH₂O). Le coefficient est négatif.
+  Il se règle dans `config.h` (`FLOW_COEF`), puis on recompile. Pour l'instant −1000, pas
+  encore étalonné. À partir d'environ −67, la courbe de débit est au moins aussi haute que
+  celle de pression sur la page (axes de ±200 L/min et ±3 cmH₂O, rapport 200/3).
+- **Pourquoi** : un seul endroit, visible dans le code et dans l'historique Git.
+- **Écarté** : le régler depuis la page et le garder dans l'appareil. Plus souple pour
+  étalonner, mais plus de code, et une valeur qu'on ne voit pas dans le dépôt.
+- **Conséquences** :
+  - changer le coefficient demande une mise à jour du firmware (depuis la page, ~30 s) ;
+  - il est noté dans les événements `start` et `continue` de chaque session (`flow_coef`).
+    Comme la pression est aussi enregistrée, on peut recalculer le débit avec un autre
+    coefficient ;
+  - une relation linéaire convient à une résistance à écoulement laminaire
+    (pneumotachographe). Pour un simple orifice, le débit suit plutôt la racine carrée de la
+    pression.
+- **Statut** : 📝 compilé, pas encore testé sur la carte.
+
+### C47 · CO₂ et O₂ simulés à partir de la respiration mesurée
+
+- **Décision** : tant qu'il n'y a pas de capteur de gaz, le firmware calcule le CO₂ et l'O₂
+  à partir de la phase de la respiration, donnée par la pression réelle (`SIM_GAS 1`).
+  - Expiration (débit du signe `SIM_EXPIRATION_SIGN`, négatif) : pendant les
+    `SIM_CO2_DEAD_S` premières secondes (0,15 s), c'est l'air de la bouche et des voies
+    respiratoires (l'espace mort), sans CO₂. Ensuite le CO₂ monte vers la valeur de fin
+    d'expiration : CO₂ = 0,04 + (5,0 − 0,04) × (1 − e^(−t / 0,10 s)).
+  - Inspiration : air frais, le CO₂ retombe à 0,04 %.
+  - O₂ = 20,95 − 1,2 × (CO₂ − 0,04) : chaque % de CO₂ rejeté correspond à environ 1,2 %
+    d'O₂ consommé (quotient respiratoire ~0,85). En fin d'expiration : CO₂ 5 %, O₂ 15 %.
+  - Les deux suivent ensuite avec le retard d'un vrai capteur de gaz (80 ms).
+  - Le bruit ne doit pas changer la phase, d'où deux étages :
+    - **seuil** (`SIM_GAS_DP_THRESHOLD`, 0,05 cmH₂O) : une pression plus faible ne compte
+      pas du tout ;
+    - **intégrateur** (`SIM_GAS_PHASE_INTEGRAL`, 0,02 cmH₂O·s) : ce qui dépasse le seuil
+      dans le sens de l'autre phase est additionné au fil du temps, et la phase change quand
+      la somme atteint cette valeur. Une pression dans le sens de la phase en cours vide la
+      somme. Un pic isolé est trop court, une vraie respiration y arrive en ~0,3 s. Le
+      début de la phase est daté au moment où la somme a commencé à se remplir.
+  - En fin d'expiration, l'air de l'embout garde son CO₂ jusqu'à la prochaine inspiration,
+    comme en vrai.
+- **Pourquoi** : des courbes de gaz cohérentes avec la respiration réelle, pour développer
+  l'affichage et l'analyse avant d'avoir les capteurs.
+- **Conséquences** :
+  - tous les paramètres sont dans `config.h` (`SIM_*`) ;
+  - ce ne sont pas des mesures, et rien ne l'indique sur la page ni dans les fichiers
+    (choix de l'équipe : on le sait). Attention avant de montrer des courbes à l'extérieur ;
+  - le CO₂ de fin d'expiration est fixe (5 %), il ne dépend pas de l'effort.
+- **Statut** : 🧪 vérifié sur une respiration type bruitée : bruit et pics seuls ne changent
+  jamais la phase, une respiration la change 2 fois par cycle. Page testée en mode démo. 📝
+  Pas encore testé sur la carte.
+
+### C48 · Niveau de batterie
+
+- **Décision** : une petite icône de pile, comme sur un téléphone, avec le % à côté, en haut
+  à droite du panneau de l'appareil, sur la ligne du titre. La tension s'affiche au survol.
+  Sous 15 %, l'icône passe en rouge et la page Direct affiche une alerte.
+  - Écarté : une ligne avec une jauge dans le panneau, qui prenait trop de place pour une
+    information qu'on regarde rarement.
+  - Pas encore de batterie : une batterie fictive (`BATTERY_SIMULATED 1`) est pleine à la
+    mise sous tension et vide au bout de `BATTERY_SIM_HOURS` (8 h).
+  - Batterie réelle (`BATTERY_SIMULATED 0`) : tension lue sur D3 (GPIO 4) à travers un pont
+    diviseur (`BATTERY_DIVIDER`, 2 par défaut : à vérifier sur la carte), moyenne de 16
+    lectures toutes les 5 s, lissée. Le % vient de la courbe de décharge d'une LiPo une
+    cellule (4,20 V = 100 %, 3,27 V = 0 %).
+- **Pourquoi** : l'appareil doit pouvoir enregistrer seul, sur batterie. Il faut voir quand
+  la recharger.
+- **Conséquences** :
+  - la tension d'une LiPo baisse un peu quand le Wi-Fi émet : le lissage évite que le % saute ;
+  - on ne sait pas encore si la batterie est en charge (il faudrait lire l'état du chargeur).
+- **Statut** : 🧪 page testée en mode démo. 📝 Lecture réelle compilée, pas encore testée
+  (pas de batterie).
 
 ---
 
@@ -464,17 +567,21 @@ Un glossaire des termes techniques est à la fin.
   X s ». Sans ce repère, on risquait de prendre une ancienne valeur pour la valeur actuelle.
 - **Statut** : 🧪 testé en mode démo. ✅ fluidité confirmée à l'œil sur la carte.
 
-### C27 · Mode démo masqué, signaux simulés signalés
+### C27 · Mode démo masqué, pas d'étiquette « Simulé »
 
 - **Décision** :
   - le mode démo (un faux appareil simulé dans la page) n'apparaît plus. Il reste accessible
-    avec `index.html?demo`, pour les tests et les présentations ;
-  - dès que les signaux sont simulés (mode démo ou firmware sans vrais capteurs), un bandeau
-    jaune et une étiquette « Simulé » sur chaque signal le disent.
+    avec `index.html?demo`, pour les tests et les présentations. Un bandeau dit alors que
+    rien n'est branché ;
+  - les signaux simulés par le firmware (capteurs simulés, CO₂ et O₂ calculés, batterie
+    fictive) ne portent aucune mention. Avant le 22 octobre 2026 : bandeau jaune et
+    étiquette « Simulé ».
 - **Pourquoi** :
   - la vraie carte fonctionne, donc le mode démo n'a plus à être mis en avant ;
-  - des courbes simulées ne doivent jamais passer pour de vraies mesures.
-- **Statut** : 🧪 testé en mode démo. 📝 à vérifier avec la carte.
+  - l'équipe sait ce qui est simulé : les étiquettes encombraient l'écran.
+- **Conséquences** : un fichier enregistré ne dit pas quelles voies étaient simulées. Il faut
+  le noter dans les notes de la session si ça compte.
+- **Statut** : 🧪 testé en mode démo.
 
 ### C28 · Gestion des enregistrements dans l'appli
 
@@ -747,14 +854,14 @@ version principale une fois validé sur la carte.
 
 | # | Sujet | Options | Proposition |
 |---|---|---|---|
-| O1 | **Capteurs** | Modèles, interfaces (I2C ou autre), unités, temps de réponse | Choisir en priorité le temps de réponse du CO₂ et de l'O₂, et prévoir le recalage dans le temps entre gaz et débit. |
-| O2 | **Alimentation** | Câble USB seul, ou batterie | À décider avec l'usage terrain. |
-| O3 | **Horloge RTC** | Sans (le PC donne l'heure), ou avec une puce | Nécessaire si l'appareil enregistre seul, sans PC. |
+| O1 | **Capteurs** | Pression : LPS28DFW (C5). Restent le CO₂ et l'O₂ : modèles, interfaces, unités, temps de réponse | Choisir en priorité le temps de réponse du CO₂ et de l'O₂, et prévoir le recalage dans le temps entre gaz et débit. |
+| O2 | **Alimentation** | Batterie prévue sur D3 (C48), pas encore branchée | Choisir la batterie, vérifier le pont diviseur, mesurer la consommation. |
+| O3 | ~~**Horloge RTC**~~ | Réglé : DS1307 (C4). | – |
 | O4 | **Connexion automatique** | Garder « Connecter + choisir le port », ou se connecter seul à l'ouverture et après un débranchement | Se connecter seul, et ne montrer que l'appareil dans la liste des ports. Peu de travail, gros gain. |
 | O5 | **Distribution aux clients** | A. appli web hébergée et installable (sans alerte Windows, mises à jour automatiques) · B. installateur `.exe` · C. appareil vu comme une clé USB | A. Questions : peut-on mettre l'appli en ligne ? Sur quel domaine ? |
 | O6 | ~~**Mise à jour du firmware chez le client**~~ | Réglé : depuis la page (C42, C43). | – |
 | O7 | **Cartes SD des clients** | Carte fournie déjà formatée, ou firmware qui lit l'exFAT | Fournir la carte. Vérifier la faisabilité de l'exFAT. |
-| O8 | **Sessions simulées sur la SD** | Rien, ou une mention « simulé » dans `meta.json` et une étiquette dans la liste | Ajouter la mention (petit changement, reflash nécessaire). |
+| O8 | **Sessions simulées sur la SD** | Rien (choix actuel, C27), ou une mention « simulé » dans `meta.json` | Rien pour l'instant. À revoir avant de donner l'appareil à quelqu'un d'extérieur. |
 | O9 | **Sans fil** | Le Wi-Fi est fait (C35 à C41). Reste à mesurer : portée avec une personne qui porte l'appareil, consommation. | Mesurer avant de décider d'une batterie (O2). |
 | O10 | **Nom USB « Breath Logger »** | Garder l'USB intégré, ou passer à la pile TinyUSB | Garder pour l'instant (on perdrait le flash facile). |
 | O11 | **Sécurité électrique** | PC sur secteur relié à un athlète | Isolateur USB, ou PC sur batterie pendant les tests. |
