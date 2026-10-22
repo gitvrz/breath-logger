@@ -5,6 +5,8 @@ on an SD card. A web page shows the signals live and manages the recordings, ove
 cable or over the device's own Wi-Fi network. No internet is needed, and nothing has to be
 installed on the PC.
 
+- **Taking over the project** (set up, `config.h`, install on your devices), in French:
+  [REPRENDRE-LE-PROJET.md](REPRENDRE-LE-PROJET.md).
 - **Use the device** (Windows): [below](#use-the-device).
 - **Change the code**: [docs/development.md](docs/development.md).
 - Messages between the page and the device, files on the SD card: [docs/protocol.md](docs/protocol.md).
